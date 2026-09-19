@@ -1,4 +1,4 @@
-import json, subprocess, sys
+import json, subprocess, sys, os
 from pathlib import Path
 
 def sh(cmd):
@@ -54,7 +54,12 @@ model=WhisperModel("small",device="cpu",compute_type="int8")
 outdir=Path("manual/output")
 outdir.mkdir(parents=True,exist_ok=True)
 
-for clip in task["clips"]:
+clips=task["clips"]
+idx=os.getenv("CLIP_INDEX")
+if idx is not None:
+    clips=[clips[int(idx)]]
+
+for clip in clips:
     name=clip["name"]
     hs=float(clip["hook_start"]); he=float(clip["hook_end"])
     bs=float(clip["body_start"]); be=float(clip["body_end"])
