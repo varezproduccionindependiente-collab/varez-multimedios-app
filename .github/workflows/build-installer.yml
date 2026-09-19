@@ -1,0 +1,38 @@
+name: Build Varez Installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'desktop/**'
+      - 'installer/**'
+      - '.github/workflows/build-installer.yml'
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build app
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r desktop/requirements.txt
+          pip install pyinstaller
+          pyinstaller --noconfirm --clean --windowed --name VarezMultimedios --paths desktop --add-data "desktop\ui;ui" --collect-all faster_whisper --collect-all ctranslate2 --collect-all av --collect-all imageio_ffmpeg desktop\app.py
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup -y --no-progress
+      - name: Build installer
+        shell: powershell
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\VarezMultimedios.iss"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VarezMultimedios-Setup
+          path: installer\VarezMultimedios-Setup.exe
+          retention-days: 30
