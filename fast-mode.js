@@ -1,4 +1,6 @@
 (() => {
+  localStorage.removeItem('varez_multimedios_job_v22');
+  localStorage.removeItem('varez_multimedios_job_v22_previous');
   const nativeFetch = window.fetch.bind(window);
   let cachedSelection = null;
 
@@ -70,9 +72,31 @@
     return response;
   };
 
+  function cleanResumeUI(){
+    const go=document.querySelector('#go');
+    const notice=document.querySelector('#jobNotice');
+    const newAnalysis=document.querySelector('#newAnalysis');
+    const sub=document.querySelector('.head .sub');
+    if(go && !go.disabled && go.textContent!=='Analizar y crear clips') go.textContent='Analizar y crear clips';
+    if(notice && !notice.hidden) notice.hidden=true;
+    if(newAnalysis && !newAnalysis.hidden) newAnalysis.hidden=true;
+    if(sub && sub.textContent.includes('El avance se guarda')) sub.textContent='Hasta cinco clips con ideas completas. Cada análisis empieza desde cero.';
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    cleanResumeUI();
+    new MutationObserver(cleanResumeUI).observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});
+  });
+
   document.addEventListener('click', event => {
     const button = event.target?.closest?.('#go');
     if(!button) return;
+
+    // Before the app's own click handler runs, discard any previous failed/done job.
+    const reset=document.querySelector('#newAnalysis');
+    if(reset) reset.click();
+    localStorage.removeItem('varez_multimedios_job_v22');
+
     const panel=document.querySelector('#progress');
     const pct=document.querySelector('#ppct');
     const bar=document.querySelector('#pbar');
@@ -83,7 +107,7 @@
     if(bar) bar.style.width='0%';
     if(label) label.textContent='Iniciando desde cero…';
     if(log){
-      log.textContent='Modo rápido fijo: Gemini 3.6 Flash, sin cambiar de método.';
+      log.textContent='Nuevo análisis. No se retomará ningún trabajo anterior.';
       log.className='log';
     }
   }, true);
