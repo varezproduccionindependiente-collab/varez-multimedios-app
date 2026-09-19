@@ -33,7 +33,7 @@
           <div class="check"><div><b>Reencuadre vertical</b><p>9:16 con recorte central. El seguimiento de rostro viene en la próxima versión.</p></div><div class="toggle on" data-setting="reframe"></div></div>
           <div class="check"><div><b>Eliminar silencios largos</b><p>La selección ya evita pausas innecesarias; el corte interno exacto está en beta.</p></div><div class="toggle beta" data-setting="silences"></div></div>
         </div></div>
-        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. En iPhone activa automáticamente un modo compatible: Whisper Tiny optimizado, fragmentos cortos, render secuencial y liberación de memoria entre etapas. En PC usa el modelo de mayor precisión.</div>
+        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. En iPhone activa automáticamente un modo compatible: Whisper Tiny optimizado, timestamps por frase, bloques cortos, render secuencial y liberación de memoria entre etapas. En PC usa el modelo de mayor precisión.</div>
       </div>
     </main>
 
@@ -179,25 +179,67 @@
   async function transcribeAll(){
     const ff=await getFF();
     const tr=await getTranscriber();
-    const chunk=MOBILE?30:60,total=Math.ceil(state.duration/chunk);let allText=[],words=[];
+    const chunk=MOBILE?24:60,total=Math.ceil(state.duration/chunk);let allText=[],words=[],segments=[];
     for(let i=0;i<total;i++){
       const start=i*chunk,len=Math.min(chunk,state.duration-start),out=`/audio_${i}.raw`;
       setProgress(20+(i/total)*42,`Preparando audio ${i+1}/${total}`,`${fmt(start)} → ${fmt(start+len)}`);
       const ret=await ff.exec(['-ss',String(start),'-t',String(len),'-i',`/input/${state.file.name}`,'-vn','-ac','1','-ar','16000','-f','s16le','-acodec','pcm_s16le',out]);
       if(ret!==0)throw new Error('No se pudo extraer el audio del video.');
       const bytes=await ff.read(out);await ff.del(out);const audio=pcm16ToFloat32(bytes);
-      setProgress(24+(i/total)*42,`Transcribiendo en español ${i+1}/${total}`,'Whisper local · modo transcripción, nunca traducción.');
-      const d=await tr(audio,{language:'spanish',task:'transcribe',return_timestamps:'word',chunk_length_s:MOBILE?20:30,stride_length_s:MOBILE?4:5,num_beams:MOBILE?2:3});
-      allText.push(String(d.text||'').trim());
-      for(const x of (d.chunks||[])){
-        const ts=x.timestamp||[0,0],raw=String(x.text||'').trim();if(!raw)continue;
-        const parts=raw.split(/\s+/).filter(Boolean);const a=Number(ts[0]||0)+start,b=Number(ts[1]??ts[0]??0)+start;
-        if(parts.length===1){words.push({word:parts[0],start:a,end:Math.max(a+.05,b)})}
-        else{const dur=Math.max(.05,b-a),step=dur/parts.length;parts.forEach((word,j)=>words.push({word,start:a+j*step,end:a+(j+1)*step}))}
+      setProgress(24+(i/total)*42,`Transcribiendo en español ${i+1}/${total}`,MOBILE?'Modo iPhone: timestamps por frase para máxima estabilidad.':'Whisper local.');
+      let d;
+      if(MOBILE){
+        d=await tr(audio,{
+          language:'spanish',
+          task:'transcribe',
+          return_timestamps:true,
+          chunk_length_s:18,
+          stride_length_s:3,
+          num_beams:1
+        });
+      }else{
+        d=await tr(audio,{
+          language:'spanish',
+          task:'transcribe',
+          return_timestamps:'word',
+          chunk_length_s:30,
+          stride_length_s:5,
+          num_beams:3
+        });
       }
+      allText.push(String(d.text||'').trim());
+      if(MOBILE){
+        const ch=Array.isArray(d.chunks)?d.chunks:[];
+        for(const x of ch){
+          const raw=String(x.text||'').trim();if(!raw)continue;
+          const ts=x.timestamp||[0,Math.min(len,18)];
+          const a=Math.max(0,Number(ts[0]||0))+start;
+          const b0=Number(ts[1]);
+          const b=(Number.isFinite(b0)?Math.max(Number(ts[0]||0)+.15,b0):Math.min(len,Number(ts[0]||0)+6))+start;
+          const seg={start:a,end:Math.min(start+len,b),text:raw};
+          segments.push(seg);
+          const parts=raw.split(/\s+/).filter(Boolean);
+          const dur=Math.max(.12,seg.end-seg.start),step=dur/Math.max(1,parts.length);
+          parts.forEach((word,j)=>words.push({
+            word,
+            start:seg.start+j*step,
+            end:Math.min(seg.end,seg.start+(j+1)*step)
+          }));
+        }
+      }else{
+        for(const x of (d.chunks||[])){
+          const ts=x.timestamp||[0,0],raw=String(x.text||'').trim();if(!raw)continue;
+          const parts=raw.split(/\s+/).filter(Boolean);const a=Number(ts[0]||0)+start,b=Number(ts[1]??ts[0]??0)+start;
+          if(parts.length===1){words.push({word:parts[0],start:a,end:Math.max(a+.05,b)})}
+          else{const dur=Math.max(.05,b-a),step=dur/parts.length;parts.forEach((word,j)=>words.push({word,start:a+j*step,end:a+(j+1)*step}))}
+        }
+      }
+      await new Promise(r=>setTimeout(r,MOBILE?60:0));
     }
     words.sort((a,b)=>a.start-b.start);
-    return {text:allText.join(' ').replace(/\s+/g,' ').trim(),words,segments:wordsToSegments(words)};
+    segments.sort((a,b)=>a.start-b.start);
+    if(!segments.length)segments=wordsToSegments(words);
+    return {text:allText.join(' ').replace(/\s+/g,' ').trim(),words,segments};
   }
 
   function norm(s=''){return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9ñáéíóúü¿?%\s]/gi,' ').replace(/\s+/g,' ').trim()}
@@ -363,7 +405,7 @@
       hist.unshift({created_at:new Date().toISOString(),source_name:state.file.name,duration_seconds:state.duration,category:state.category,status:'ready',clips:state.clips});
       localStorage.setItem('varez_multimedios_history',JSON.stringify(hist.slice(0,12)));
       setProgress(100,'5 clips listos','Ya están editados abajo: reproducilos directamente y descargá los que quieras.');loadHistory();
-    }catch(err){setProgress(100,'Hubo un problema',err.message||String(err));$('#log').classList.add('error');alert((err.message||err)+'\n\nPara notas largas, usá preferentemente una PC o Mac.')}finally{$('#analyzeBtn').disabled=false}
+    }catch(err){setProgress(100,'Hubo un problema',err.message||String(err));$('#log').classList.add('error');alert((err.message||err)+'\n\nLa app está en modo iPhone. Si vuelve a fallar, mandame esta pantalla y ajusto el punto exacto.')}finally{$('#analyzeBtn').disabled=false}
   }
 
   function renderResults(){
