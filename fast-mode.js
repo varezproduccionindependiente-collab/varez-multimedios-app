@@ -60,7 +60,7 @@
 
       if(response.status===429){
         return new Response(
-          JSON.stringify({error:'Gemini sigue con límite momentáneo. Tocá Continuar trabajo dentro de unos segundos.'}),
+          JSON.stringify({error:'Gemini sigue con límite momentáneo. Volvé a iniciar el análisis dentro de unos segundos.'}),
           {status:400,headers:{'Content-Type':'application/json'}}
         );
       }
