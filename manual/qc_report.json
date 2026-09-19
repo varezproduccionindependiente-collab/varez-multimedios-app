@@ -1,0 +1,170 @@
+{
+  "ok": true,
+  "clips": [
+    {
+      "name": "FM_Ciudad_Clip_01_Vertigo_vs_Mareo",
+      "checks": {
+        "hd_exists": true,
+        "hd_resolution": [
+          1080,
+          1920
+        ],
+        "hd_video_codec": "h264",
+        "hd_audio_codec": "aac",
+        "hd_has_video": true,
+        "hd_has_audio": true,
+        "hd_fps": 30.0,
+        "hd_duration": 63.0,
+        "hd_size_bytes": 23126256,
+        "preview_exists": true,
+        "preview_resolution": [
+          540,
+          960
+        ],
+        "preview_video_codec": "h264",
+        "preview_audio_codec": "aac",
+        "preview_has_video": true,
+        "preview_has_audio": true,
+        "preview_fps": 30.0,
+        "preview_duration": 63.018,
+        "preview_size_bytes": 4488764,
+        "expected_duration": 63.0,
+        "silences_over_1s": []
+      },
+      "issues": [],
+      "ok": true
+    },
+    {
+      "name": "FM_Ciudad_Clip_02_Panico_vs_Vertigo",
+      "checks": {
+        "hd_exists": true,
+        "hd_resolution": [
+          1080,
+          1920
+        ],
+        "hd_video_codec": "h264",
+        "hd_audio_codec": "aac",
+        "hd_has_video": true,
+        "hd_has_audio": true,
+        "hd_fps": 30.0,
+        "hd_duration": 94.0,
+        "hd_size_bytes": 32568017,
+        "preview_exists": true,
+        "preview_resolution": [
+          540,
+          960
+        ],
+        "preview_video_codec": "h264",
+        "preview_audio_codec": "aac",
+        "preview_has_video": true,
+        "preview_has_audio": true,
+        "preview_fps": 30.0,
+        "preview_duration": 94.016,
+        "preview_size_bytes": 6330136,
+        "expected_duration": 94.0,
+        "silences_over_1s": []
+      },
+      "issues": [],
+      "ok": true
+    },
+    {
+      "name": "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado",
+      "checks": {
+        "hd_exists": true,
+        "hd_resolution": [
+          1080,
+          1920
+        ],
+        "hd_video_codec": "h264",
+        "hd_audio_codec": "aac",
+        "hd_has_video": true,
+        "hd_has_audio": true,
+        "hd_fps": 30.0,
+        "hd_duration": 93.0,
+        "hd_size_bytes": 29238111,
+        "preview_exists": true,
+        "preview_resolution": [
+          540,
+          960
+        ],
+        "preview_video_codec": "h264",
+        "preview_audio_codec": "aac",
+        "preview_has_video": true,
+        "preview_has_audio": true,
+        "preview_fps": 30.0,
+        "preview_duration": 93.013,
+        "preview_size_bytes": 5053853,
+        "expected_duration": 93.0,
+        "silences_over_1s": []
+      },
+      "issues": [],
+      "ok": true
+    },
+    {
+      "name": "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes",
+      "checks": {
+        "hd_exists": true,
+        "hd_resolution": [
+          1080,
+          1920
+        ],
+        "hd_video_codec": "h264",
+        "hd_audio_codec": "aac",
+        "hd_has_video": true,
+        "hd_has_audio": true,
+        "hd_fps": 30.0,
+        "hd_duration": 96.0,
+        "hd_size_bytes": 28655576,
+        "preview_exists": true,
+        "preview_resolution": [
+          540,
+          960
+        ],
+        "preview_video_codec": "h264",
+        "preview_audio_codec": "aac",
+        "preview_has_video": true,
+        "preview_has_audio": true,
+        "preview_fps": 30.0,
+        "preview_duration": 96.0,
+        "preview_size_bytes": 5404655,
+        "expected_duration": 96.0,
+        "silences_over_1s": []
+      },
+      "issues": [],
+      "ok": true
+    },
+    {
+      "name": "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia",
+      "checks": {
+        "hd_exists": true,
+        "hd_resolution": [
+          1080,
+          1920
+        ],
+        "hd_video_codec": "h264",
+        "hd_audio_codec": "aac",
+        "hd_has_video": true,
+        "hd_has_audio": true,
+        "hd_fps": 30.0,
+        "hd_duration": 42.0,
+        "hd_size_bytes": 12805448,
+        "preview_exists": true,
+        "preview_resolution": [
+          540,
+          960
+        ],
+        "preview_video_codec": "h264",
+        "preview_audio_codec": "aac",
+        "preview_has_video": true,
+        "preview_has_audio": true,
+        "preview_fps": 30.0,
+        "preview_duration": 42.005,
+        "preview_size_bytes": 2633068,
+        "expected_duration": 42.0,
+        "silences_over_1s": []
+      },
+      "issues": [],
+      "ok": true
+    }
+  ]
+}
