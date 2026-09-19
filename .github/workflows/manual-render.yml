@@ -11,25 +11,23 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          python -m pip install --upgrade pip
-          pip install gdown requests
-      - name: Render clip
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          pip install gdown
+      - name: Render Varez clip
         run: python worker/manual_render.py
-      - name: Save result link
+      - name: Publish clip
         run: |
           git config user.name "Varez Worker"
           git config user.email "actions@users.noreply.github.com"
-          git pull --rebase
-          git add manual/render_result.json
-          git commit -m "Add manual render result" || exit 0
+          git add manual/output/Nati_Clip_01.mp4
+          git commit -m "Render Nati Varez clip 01" || exit 0
           git push
