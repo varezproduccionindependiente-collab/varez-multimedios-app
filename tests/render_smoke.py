@@ -50,6 +50,19 @@ with tempfile.TemporaryDirectory(prefix='varez-render-') as temp:
     assert telephone<normal*.5,(telephone,normal)
     print('PASS: 1080x1920, intact 7s timeline, B&W → transition → color, telephone → normal audio')
 
+    teaser={'start':0,'end':7,'edit_style':'teaser','hook_start_rel':4,'hook_end_rel':7,'captions':True,'qa':True,
+            'hook_words':[{'word':'FINAL','start':.1,'end':2.8}],
+            'words':[{'word':'INICIO','start':.1,'end':1.0},{'word':'FINAL','start':4.1,'end':6.8}]}
+    timeline=render.caption_words(teaser)
+    assert timeline[1]['start']==3.1 and timeline[2]['start']==7.1
+    render.make_ass(timeline,ass)
+    render.run_ffmpeg(src,out,ass,teaser)
+    probe=json.loads(cmd('ffprobe','-v','error','-show_entries','format=duration','-of','json',str(out)))
+    assert abs(float(probe['format']['duration'])-10)<.1,probe
+    assert colorfulness(out,2.9)<3 and colorfulness(out,3.05)>20
+    assert frequency_ratio(out,1)<frequency_ratio(out,4)*.5
+    print('PASS: ending teaser prepended, 10s total, hard color cut, phone audio, repeated captions')
+
     manifest={'render_id':'fixture-attempt-2','clips':[
       {'source_index':i,'source_parts':['broken' if i==2 else 'good'],'start':0,'end':7,'output_path':f'output-{i}.mp4','output_upload_url':f'upload-{i}'} for i in [1,2,3]]}
     class Response:

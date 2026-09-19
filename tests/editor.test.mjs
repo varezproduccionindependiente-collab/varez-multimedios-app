@@ -53,3 +53,12 @@ test('editorial rejection yields four good clips and is not retried forever',asy
   assert.equal(good.length,4);assert.equal(j.entries[3].status,'skipped');
   await prepareCandidates(j,()=>assert.fail('completed or rejected candidates must be reused'));
 });
+
+test('a short closing statement can be the independent teaser',()=>{
+  const p=planFromWordIds(c,words,context,200,{usable:true,first_word:0,last_word:15,hook_first_word:12,hook_last_word:15,complete_start:true,complete_end:true,protagonist_hook:true});
+  assert.ok(p);
+  assert.equal(p.hook_words[0].word,'Ese');
+  assert.equal(p.words[0].word,'La');
+  assert.equal(p.words.at(-1).word,'compromiso.');
+  assert.ok(p.hook_start_rel>4);
+});

@@ -64,10 +64,11 @@ def make_ass(words, out_path):
     words=[w for w in (words or []) if str(w.get("word","")).strip()]
     groups=[]; g=[]
     for w in words:
-        w={"word":str(w["word"]).strip(),"start":float(w.get("start",0)),"end":float(w.get("end",0))}
+        segment=w.get("segment",0)
+        w={"segment":segment,"word":str(w["word"]).strip(),"start":float(w.get("start",0)),"end":float(w.get("end",0))}
         gap=w["start"]-(g[-1]["end"] if g else w["start"])
         chars=sum(len(x["word"])+1 for x in g)+len(w["word"])
-        if g and (len(g)>=4 or gap>.55 or chars>28):
+        if g and (segment != g[-1].get("segment",0) or len(g)>=4 or gap>.55 or chars>28):
             groups.append(g); g=[]
         g.append(w)
         if re.search(r"[.!?…]$",w["word"]) and len(g)>=2:
@@ -106,7 +107,24 @@ def run_ffmpeg(src, out, ass, clip):
 
     base="setpts=PTS-STARTPTS,fps=30,settb=AVTB,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     fc=[]
-    if qa:
+    extra_inputs=[]
+    if clip.get("edit_style") == "teaser" and clip.get("qa", True):
+        hs=float(clip["hook_start_rel"]); he=float(clip["hook_end_rel"])
+        q=he-hs
+        if not (0 <= hs < he <= duration+.02 and .7 < q <= 6):
+            raise ValueError("Invalid teaser bounds")
+        extra_inputs=["-ss",str(source_offset+hs),"-t",str(q),"-i",str(src)]
+        fc += [
+            f"[1:v]{base},hue=s=0,eq=contrast=1.06:brightness=-0.025,drawgrid=w=iw:h=6:t=1:c=black@0.12[hookv]",
+            f"[0:v]{base}[bodyv]",
+            "[hookv][bodyv]concat=n=2:v=1:a=0[vbase]",
+            f"[1:a]asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,apad,atrim=duration={q:.6f}[hooka]",
+            f"[0:a]asetpts=PTS-STARTPTS,apad,atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[bodya]",
+            "[hooka][bodya]concat=n=2:v=0:a=1,aresample=48000[speech]",
+            f"anoisesrc=color=pink:amplitude=0.12:duration=0.24:sample_rate=48000,highpass=f=700,lowpass=f=6500,afade=t=in:d=0.10,afade=t=out:st=0.10:d=0.14,adelay={round((q-.12)*1000)}:all=1[whoosh]",
+            "[speech][whoosh]amix=inputs=2:duration=first:normalize=0[abase]",
+        ]
+    elif qa and clip.get("edit_style") != "teaser":
         transition=max(.18,min(.38,q-.25,duration-q-.25))
         fc += [
             f"[0:v]{base},split=2[vq0][vr0]",
@@ -130,12 +148,23 @@ def run_ffmpeg(src, out, ass, clip):
     cmd=[
         "ffmpeg","-hide_banner","-loglevel","error","-y",
         "-ss",str(source_offset),"-t",str(duration),"-i",str(src),
+        *extra_inputs,
         "-filter_complex",";".join(fc),
         "-map","[v]","-map","[a]",
         "-c:v","libx264","-preset","veryfast","-crf","21","-maxrate","5600k","-bufsize","11200k","-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","160k","-movflags","+faststart",str(out)
     ]
     subprocess.run(cmd,check=True)
+
+def caption_words(clip):
+    words=clip.get("words", [])
+    if clip.get("edit_style") != "teaser" or not clip.get("qa", True):
+        return words
+    duration=float(clip["hook_end_rel"])-float(clip["hook_start_rel"])
+    # Separate subtitle groups at the cut; the teaser must not borrow body words.
+    return [dict(w, segment=0, end=min(float(w["end"]),duration-.15)) for w in clip.get("hook_words", [])] + [
+        dict(w,segment=1,start=float(w["start"])+duration,end=float(w["end"])+duration) for w in words
+    ]
 
 def main():
     ap=argparse.ArgumentParser()
@@ -164,7 +193,7 @@ def main():
                         rr.raise_for_status()
                         for chunk in rr.iter_content(1024*1024):
                             if chunk: f.write(chunk)
-                ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
+                ass=td/f"clip-{i:02d}.ass"; make_ass(caption_words(clip),ass)
                 out=td/f"{jid}-output-{i:02d}.mp4"
                 run_ffmpeg(src,out,ass,clip)
                 output_url=clip.get("output_upload_url")

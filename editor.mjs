@@ -48,13 +48,15 @@ function afterWord(words, index) {
   const gap=next ? Math.max(0,next.start-w.end) : .7;
   return w.end+Math.min(.4,gap*.5);
 }
-function rangePlan(c, words, contextStart, total, first, last, hookLast, requireHook) {
+function rangePlan(c, words, contextStart, total, first, last, hookLast, requireHook, hookFirst=first) {
   if (![first,last].every(Number.isInteger) || first<0 || last>=words.length || first>=last) return null;
-  if (requireHook && (!Number.isInteger(hookLast) || hookLast<first || hookLast>=last)) return null;
+  if (requireHook && (!Number.isInteger(hookLast) || hookLast<hookFirst || hookLast>last || !Number.isInteger(hookFirst) || hookFirst<first)) return null;
   const start=contextStart+beforeWord(words,first), end=Math.min(total,contextStart+afterWord(words,last));
-  const intro=Number.isInteger(hookLast) ? words[hookLast].end+contextStart-start : 0;
-  if (end-start<2 || (requireHook && (intro<=.7 || intro>=end-start-.7))) return null;
-  return {...c,start,end,hook_end:contextStart+(words[hookLast]?.end || 0),intro_end_rel:intro,
+  const hs=requireHook && Number.isInteger(hookFirst) ? beforeWord(words,hookFirst) : 0;
+  const he=requireHook && Number.isInteger(hookLast) ? afterWord(words,hookLast) : 0;
+  const intro=requireHook ? he-hs : 0;
+  if (end-start<2 || (requireHook && (intro<=.7 || intro>6 || intro>=end-start-.7))) return null;
+  return {...c,start,end,edit_style:"teaser",hook_start_rel:hs+contextStart-start,hook_end_rel:he+contextStart-start,hook_words:requireHook ? words.slice(hookFirst,hookLast+1).map(w=>({...w,start:w.start-hs,end:w.end-hs})) : [],hook_end:contextStart+(words[hookLast]?.end || 0),intro_end_rel:intro,
     opening_words:words.slice(first,Math.min(first+10,last+1)).map(w=>w.word).join(' '),
     closing_words:words.slice(Math.max(first,last-9),last+1).map(w=>w.word).join(' '),
     words:words.slice(first,last+1).map(w=>({...w,start:Math.max(0,w.start+contextStart-start),end:w.end+contextStart-start}))};
@@ -65,16 +67,17 @@ export function alignQuotes(c, words, contextStart, total, requireHook=true) {
   const last=findQuote(words,c.closing_words,c.end-contextStart);
   // A correct quote fixes an absolute/relative hook timestamp mixup as well as a missing timestamp.
   const hook=findQuote(words,c.hook_closing_words,Number(c.hook_end)-contextStart);
-  if (!first || !last || (requireHook && !hook)) return null;
+  const hookFirst=findQuote(words,c.hook_opening_words,Number(c.hook_start)-contextStart,"start");
+  if (!first || !last || (requireHook && (!hook || (c.hook_opening_words && !hookFirst)))) return null;
   if (Math.abs(words[first.first].start+contextStart-c.start)>5 || Math.abs(words[last.last].end+contextStart-c.end)>5) return null;
-  return rangePlan(c,words,contextStart,total,first.first,last.last,hook?.last,requireHook);
+  return rangePlan(c,words,contextStart,total,first.first,last.last,hook?.last,requireHook,hookFirst?.first ?? first.first);
 }
 
 export function planFromWordIds(c, words, contextStart, total, answer, requireHook=true) {
   if (answer?.usable!==true) return null;
   const first=answer.first_word, last=answer.last_word, hook=answer.hook_last_word;
   if (answer.complete_start!==true || answer.complete_end!==true || (requireHook && answer.protagonist_hook!==true)) return null;
-  return rangePlan(c,words,contextStart,total,first,last,hook,requireHook);
+  return rangePlan(c,words,contextStart,total,first,last,hook,requireHook,answer.hook_first_word ?? first);
 }
 
 export async function prepareCandidates(job, prepare, save=()=>{}) {
