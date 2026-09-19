@@ -29,6 +29,7 @@ OLLAMA_RUNTIME.mkdir(parents=True, exist_ok=True)
 # Force the heavy model caches to D: when that drive exists.
 os.environ["HF_HOME"] = str(MODELS / "huggingface")
 os.environ["HUGGINGFACE_HUB_CACHE"] = str(MODELS / "huggingface" / "hub")
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 os.environ["OLLAMA_MODELS"] = str(MODELS / "ollama")
 
 from core import run_job, detect_runtime, choose_ollama_model
