@@ -1,0 +1,95 @@
+name: Varez Clip QC
+
+on:
+  push:
+    paths:
+      - "manual/qc_task.json"
+
+permissions:
+  contents: write
+
+jobs:
+  qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Validate clips
+        run: |
+          python - <<'PY'
+          import json, subprocess, pathlib, re, math
+          task=json.loads(pathlib.Path("manual/qc_task.json").read_text())
+          render=json.loads(pathlib.Path("manual/render_task.json").read_text())
+          spec={c["name"]:c for c in render["clips"]}
+          report={"ok":True,"clips":[]}
+          for name in task["clips"]:
+              hd=pathlib.Path("manual/output")/(name+".mp4")
+              pv=pathlib.Path("manual/previews")/(name+"_preview.mp4")
+              item={"name":name,"checks":{},"issues":[]}
+              for label,path,expected_wh in [("hd",hd,(1080,1920)),("preview",pv,(540,960))]:
+                  if not path.exists():
+                      item["checks"][label+"_exists"]=False
+                      item["issues"].append(f"{label} missing")
+                      continue
+                  item["checks"][label+"_exists"]=True
+                  meta=json.loads(subprocess.check_output([
+                      "ffprobe","-v","error","-show_streams","-show_format","-of","json",str(path)
+                  ],text=True))
+                  vs=next((s for s in meta["streams"] if s.get("codec_type")=="video"),{})
+                  aus=next((s for s in meta["streams"] if s.get("codec_type")=="audio"),{})
+                  w,h=vs.get("width"),vs.get("height")
+                  item["checks"][label+"_resolution"]=[w,h]
+                  item["checks"][label+"_video_codec"]=vs.get("codec_name")
+                  item["checks"][label+"_audio_codec"]=aus.get("codec_name")
+                  item["checks"][label+"_has_video"]=bool(vs)
+                  item["checks"][label+"_has_audio"]=bool(aus)
+                  fps=vs.get("avg_frame_rate","0/1")
+                  try:
+                      a,b=map(float,fps.split("/")); fpsv=a/b if b else 0
+                  except: fpsv=0
+                  item["checks"][label+"_fps"]=round(fpsv,3)
+                  dur=float(meta.get("format",{}).get("duration") or 0)
+                  item["checks"][label+"_duration"]=round(dur,3)
+                  size=int(meta.get("format",{}).get("size") or 0)
+                  item["checks"][label+"_size_bytes"]=size
+                  if (w,h)!=expected_wh: item["issues"].append(f"{label} wrong resolution {w}x{h}")
+                  if vs.get("codec_name")!="h264": item["issues"].append(f"{label} video codec {vs.get('codec_name')}")
+                  if aus.get("codec_name")!="aac": item["issues"].append(f"{label} audio codec {aus.get('codec_name')}")
+                  if abs(fpsv-30)>0.2: item["issues"].append(f"{label} fps {fpsv}")
+              c=spec.get(name)
+              if c and hd.exists():
+                  expected=(float(c["hook_end"])-float(c["hook_start"]))+(float(c["body_end"])-float(c["body_start"]))
+                  actual=item["checks"].get("hd_duration",0)
+                  item["checks"]["expected_duration"]=round(expected,3)
+                  if abs(actual-expected)>0.6:
+                      item["issues"].append(f"duration mismatch actual={actual} expected={expected}")
+                  p=subprocess.run([
+                      "ffmpeg","-hide_banner","-i",str(hd),"-af","silencedetect=noise=-45dB:d=1.0",
+                      "-f","null","-"
+                  ],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+                  silences=re.findall(r"silence_duration: ([0-9.]+)",p.stderr)
+                  long_s=[float(x) for x in silences if float(x)>=1.0]
+                  item["checks"]["silences_over_1s"]=long_s
+                  if long_s: item["issues"].append(f"long silence(s): {long_s}")
+              item["ok"]=not item["issues"]
+              if not item["ok"]: report["ok"]=False
+              report["clips"].append(item)
+          pathlib.Path("manual/qc_report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print(json.dumps(report,ensure_ascii=False,indent=2))
+          if not report["ok"]:
+              raise SystemExit(2)
+          PY
+      - name: Publish QC report
+        if: always()
+        run: |
+          git config user.name "Varez Worker"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main
+          git add manual/qc_report.json
+          git commit -m "Add FM Ciudad clip QC report" || exit 0
+          git pull --rebase origin main
+          git push
