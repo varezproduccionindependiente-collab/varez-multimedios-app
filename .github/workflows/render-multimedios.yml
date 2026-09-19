@@ -1,0 +1,38 @@
+name: Render Varez Multimedios
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Draft release id used as temporary storage"
+        required: true
+        type: string
+      job_id:
+        description: "Varez job id"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade requests
+      - name: Render five clips
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python worker/render.py --release-id "${{ inputs.release_id }}" --job-id "${{ inputs.job_id }}"
