@@ -1,11 +1,18 @@
 {
   "clips": [
-    2,
-    3,
-    4,
-    5,
-    6
+    "FM_Ciudad_Clip_01_Vertigo_vs_Mareo",
+    "FM_Ciudad_Clip_02_Panico_vs_Vertigo",
+    "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado",
+    "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes",
+    "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia"
   ],
+  "titles": {
+    "FM_Ciudad_Clip_01_Vertigo_vs_Mareo": "Vértigo vs. mareo",
+    "FM_Ciudad_Clip_02_Panico_vs_Vertigo": "Pánico vs. vértigo",
+    "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado": "Auriculares y oído embotado",
+    "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes": "Pérdida auditiva en jóvenes",
+    "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia": "Pérdida súbita de audición"
+  },
   "quality": "540x960-fast",
-  "nonce": 1789850160242
+  "nonce": 1789850301
 }
