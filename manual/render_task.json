@@ -1,10 +1,110 @@
 {
-  "job_id": "nati-20260919-clip1",
   "drive_file_id": "1lUYJlWAalgcsuLEhBOkEaHYFO1wob2mC",
-  "start": 939.6,
-  "end": 979.4,
-  "hook_start": 969.33,
-  "hook_end": 979.33,
-  "output_name": "Nati_Tarot_Futuro_Varez.mp4",
-  "title": "¿El futuro está escrito?"
+  "body_start": 349.24,
+  "body_end": 422.36,
+  "hook_start": 403.32,
+  "hook_end": 409.32,
+  "segments": [
+    {
+      "start": 349.24,
+      "end": 351.24,
+      "text": "Si se puede ver si hay una tercera persona."
+    },
+    {
+      "start": 351.24,
+      "end": 355.24,
+      "text": "Yo veo que la persona que preguntó está en la carencia."
+    },
+    {
+      "start": 355.28,
+      "end": 359.28,
+      "text": "No se da ella misma el valor que se debe de dar."
+    },
+    {
+      "start": 359.28,
+      "end": 365.28,
+      "text": "Para ver mi mundo no pasa por si aparece una tercera persona o no aparece una tercera persona."
+    },
+    {
+      "start": 365.28,
+      "end": 370.28,
+      "text": "Porque puede suceder en una pareja que después de un montón de años aparezca."
+    },
+    {
+      "start": 370.28,
+      "end": 372.28,
+      "text": "A ver la atracción es normal."
+    },
+    {
+      "start": 372.28,
+      "end": 376.28,
+      "text": "O sea algo que es animal."
+    },
+    {
+      "start": 376.28,
+      "end": 382.28,
+      "text": "Tal cual y yo tengo que ver que estoy dispuesto a negociar en eso."
+    },
+    {
+      "start": 382.32,
+      "end": 387.32,
+      "text": "Si me voy a dejar llevar por esa pasión o atracción"
+    },
+    {
+      "start": 387.32,
+      "end": 390.32,
+      "text": "o voy a respetar a la persona que yo tengo al lado"
+    },
+    {
+      "start": 390.32,
+      "end": 394.32,
+      "text": "pero esa persona que yo tengo al lado la voy a respetar si se respeta."
+    },
+    {
+      "start": 394.32,
+      "end": 398.32,
+      "text": "Y si yo no atraigo constantemente"
+    },
+    {
+      "start": 398.32,
+      "end": 400.32,
+      "text": "el que va a estar triangulándome"
+    },
+    {
+      "start": 400.32,
+      "end": 403.32,
+      "text": "porque para eso yo no estoy confiando en la persona."
+    },
+    {
+      "start": 403.32,
+      "end": 406.32,
+      "text": "Y lo primero en una pareja es la confianza gente."
+    },
+    {
+      "start": 406.32,
+      "end": 409.32,
+      "text": "Si yo no confío en la persona para qué me quedo donde no confío."
+    },
+    {
+      "start": 409.36,
+      "end": 412.36,
+      "text": "Hay que confiar por más que el otro tenga una vida paralela."
+    },
+    {
+      "start": 412.36,
+      "end": 417.36,
+      "text": "No, si tiene una vida paralela yo elijo si me quedo"
+    },
+    {
+      "start": 417.36,
+      "end": 420.36,
+      "text": "y sostengo si me voy y no estoy dispuesto a negociar."
+    },
+    {
+      "start": 420.36,
+      "end": 422.36,
+      "text": "Yo con eso no negocio."
+    }
+  ],
+  "nonce": 1
 }
