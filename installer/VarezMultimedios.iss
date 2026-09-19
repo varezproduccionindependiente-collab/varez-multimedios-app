@@ -15,7 +15,7 @@ UninstallDisplayName=Varez Servicios para Multimedios
 CreateUninstallRegKey=yes
 
 [Files]
-Source: "dist\VarezMultimedios\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\VarezMultimedios\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Varez Servicios para Multimedios"; Filename: "{app}\VarezMultimedios.exe"
