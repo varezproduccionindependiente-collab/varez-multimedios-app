@@ -147,7 +147,7 @@ class API:
             "models_root": str(MODELS),
             "runtime_root": str(OLLAMA_RUNTIME),
             "allow_20b": True,
-            "app_version": "1.1.0",
+            "app_version": "1.1.1",
         }
 
     def pick_video(self):
