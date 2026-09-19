@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ctypes
+import hashlib
 import re
 import shutil
 import subprocess
@@ -16,14 +18,30 @@ from faster_whisper import WhisperModel
 OLLAMA = "http://127.0.0.1:11434"
 
 
+def _cuda_dlls_available():
+    # nvidia-smi only proves the driver exists. CTranslate2 also needs the
+    # CUDA runtime DLLs. Checking them here avoids wasting time on a GPU load
+    # that is guaranteed to fail.
+    if not hasattr(ctypes, "WinDLL"):
+        return False
+    required = ("cublas64_12.dll", "cudnn64_9.dll")
+    handles = []
+    try:
+        for dll in required:
+            handles.append(ctypes.WinDLL(dll))
+        return True
+    except Exception:
+        return False
+
+
 def detect_runtime(config):
     cuda = False
     gpu_name = None
     try:
         p = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True, timeout=3)
         if p.returncode == 0 and p.stdout.strip():
-            cuda = True
             gpu_name = p.stdout.strip().splitlines()[0]
+            cuda = _cuda_dlls_available()
     except Exception:
         pass
     return {
@@ -58,35 +76,42 @@ def _whisper_repo_folder(model_name: str, whisper_root: Path):
 
 
 def _load_whisper_model(model_name: str, device: str, compute: str, whisper_root: Path, status):
-    try:
-        return WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute,
-            download_root=str(whisper_root),
-        )
-    except Exception as e:
-        msg = str(e).lower()
-        if "model.bin" not in msg and "unable to open file" not in msg:
-            raise
+    last_error = None
+    for attempt in range(3):
+        try:
+            return WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute,
+                download_root=str(whisper_root),
+            )
+        except Exception as e:
+            last_error = e
+            msg = str(e).lower()
+            broken = _whisper_repo_folder(model_name, whisper_root)
 
-        # A previous interrupted download can leave a Hugging Face snapshot
-        # without model.bin. Remove only that model cache and retry once.
-        broken = _whisper_repo_folder(model_name, whisper_root)
-        status(
-            8,
-            "Reparando Whisper…",
-            "La descarga anterior quedó incompleta. Varez la elimina y vuelve a bajarla.",
-        )
-        if broken.exists():
-            shutil.rmtree(broken, ignore_errors=True)
+            # Missing model.bin means a partial Hugging Face snapshot. Network
+            # interruptions can also leave a partial cache, so on retries we
+            # clean only this model and start again.
+            should_clean = (
+                "model.bin" in msg
+                or "unable to open file" in msg
+                or "snapshot" in msg
+                or "incomplete" in msg
+            )
+            if should_clean and broken.exists():
+                shutil.rmtree(broken, ignore_errors=True)
 
-        return WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute,
-            download_root=str(whisper_root),
-        )
+            if attempt < 2:
+                status(
+                    8,
+                    "Reparando Whisper…",
+                    f"Intento {attempt + 2}/3. Reintentando la descarga limpia del modelo.",
+                )
+                time.sleep(1.5)
+                continue
+            raise last_error
+    raise last_error
 
 
 def _run_whisper(path: Path, model_name: str, device: str, compute: str, whisper_root: Path, status):
@@ -185,10 +210,21 @@ def select_clips(transcript, total, options, config, status):
     if not any(x == model or x.startswith(model + ":") for x in names):
         raise RuntimeError("Falta el modelo local " + model + ". Tocá 'Preparar IA local' una sola vez.")
 
-    short = total < 150
-    medium = 150 <= total < 300
-    min_dur, max_dur = (14, 30) if short else ((18, 45) if medium else (25, 58))
-    overlap = "Se permite superposición parcial si cada clip tiene una idea distinta." if short else "Evitá superposiciones importantes."
+    if total < 45:
+        min_dur, max_dur = 5, max(8, min(20, int(total * 0.7)))
+        overlap = "Se permite bastante superposición porque el material es muy corto, pero cada clip debe tener una idea distinta."
+    elif total < 90:
+        min_dur, max_dur = 8, 24
+        overlap = "Se permite superposición parcial si cada clip tiene una idea distinta."
+    elif total < 150:
+        min_dur, max_dur = 12, 30
+        overlap = "Se permite superposición parcial si cada clip tiene una idea distinta."
+    elif total < 300:
+        min_dur, max_dur = 18, 45
+        overlap = "Evitá superposiciones importantes."
+    else:
+        min_dur, max_dur = 25, 58
+        overlap = "Evitá superposiciones importantes."
     category = str(options.get("category", "Entrevista"))
     mode = str(options.get("mode", "auto"))
     request = str(options.get("request", "")).strip() or "ninguno"
@@ -352,6 +388,38 @@ def render_clip(video, clip, words, out, status, idx):
     ass.unlink(missing_ok=True)
     if p.returncode != 0:
         raise RuntimeError("FFmpeg falló en clip " + str(idx + 1) + ": " + p.stderr[-800:])
+
+
+def _video_cache_key(video_path: Path):
+    st = video_path.stat()
+    raw = f"{video_path.resolve()}|{st.st_size}|{st.st_mtime_ns}"
+    return hashlib.sha256(raw.encode("utf-8", "ignore")).hexdigest()[:24]
+
+
+def _load_or_transcribe(video_path: Path, config, data_dir: Path, status):
+    rt = detect_runtime(config)
+    model_hint = rt["whisper_model"]
+    cache_dir = data_dir / "cache" / "transcripts"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{_video_cache_key(video_path)}_{model_hint}.json"
+
+    if cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text("utf-8"))
+            if cached.get("segments") and cached.get("words"):
+                status(35, "Transcripción recuperada…", "Ya estaba guardada en esta PC; no la vuelvo a procesar.")
+                return cached
+        except Exception:
+            cache_file.unlink(missing_ok=True)
+
+    transcript = _load_or_transcribe(video_path, config, data_dir, status)
+    try:
+        tmp = cache_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(cache_file)
+    except Exception:
+        pass
+    return transcript
 
 
 def run_job(video_path: Path, job_id: str, options, config, data_dir: Path, status):
