@@ -1,0 +1,34 @@
+name: Manual Varez Transcribe
+
+on:
+  push:
+    paths:
+      - "manual/task.json"
+
+permissions:
+  contents: write
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install gdown faster-whisper
+      - name: Transcribe Drive video
+        run: python worker/manual_transcribe.py
+      - name: Save transcript
+        run: |
+          git config user.name "Varez Worker"
+          git config user.email "actions@users.noreply.github.com"
+          git add manual/transcript.json
+          git commit -m "Add manual transcript" || exit 0
+          git push
