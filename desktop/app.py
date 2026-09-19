@@ -32,7 +32,7 @@ os.environ["HUGGINGFACE_HUB_CACHE"] = str(MODELS / "huggingface" / "hub")
 os.environ["HF_HUB_DISABLE_XET"] = "1"
 os.environ["OLLAMA_MODELS"] = str(MODELS / "ollama")
 
-from core import run_job, detect_runtime, choose_ollama_model
+from core import run_job, detect_runtime, choose_ollama_model, prepare_whisper_model
 
 CONFIG_PATH = DATA / "config.json"
 
@@ -147,6 +147,7 @@ class API:
             "models_root": str(MODELS),
             "runtime_root": str(OLLAMA_RUNTIME),
             "allow_20b": True,
+            "app_version": "1.1.0",
         }
 
     def pick_video(self):
@@ -248,10 +249,12 @@ class API:
         def pull():
             with self.lock:
                 self.state.update(
-                    running=True, progress=2, title="Preparando IA local…",
-                    detail="Descargando " + model + ". Esto se hace una sola vez.", error=None
+                    running=True, progress=2, title="Preparando todo…",
+                    detail="Primero verifico el modelo editorial y después Whisper.", error=None
                 )
+
             try:
+                # 1) Ollama model. If it is already present, Ollama returns quickly.
                 with requests.post(
                     "http://127.0.0.1:11434/api/pull",
                     json={"name": model, "stream": True},
@@ -267,15 +270,58 @@ class API:
                             pct = int((completed / total) * 100) if total and completed else None
                             with self.lock:
                                 if pct is not None:
-                                    self.state["progress"] = max(2, min(100, pct))
+                                    self.state["progress"] = max(2, min(72, 2 + int(pct * 0.70)))
+                                self.state["title"] = "Preparando modelo editorial…"
                                 self.state["detail"] = d.get("status", self.state["detail"])
                         except Exception:
                             pass
+
+                # 2) Whisper is downloaded to a direct verified folder, not HF snapshots.
+                def whisper_status(p, title, detail=""):
+                    with self.lock:
+                        self.state["progress"] = max(74, min(99, 74 + int(p * 0.25)))
+                        self.state["title"] = title
+                        self.state["detail"] = detail
+
+                whisper = prepare_whisper_model(self.config, whisper_status)
+
+                # 3) Quick FFmpeg availability check before claiming the PC is ready.
+                ffmpeg = None
+                try:
+                    import imageio_ffmpeg
+                    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+                    test = subprocess.run(
+                        [ffmpeg, "-hide_banner", "-version"],
+                        capture_output=True, text=True, timeout=15,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    if test.returncode != 0:
+                        raise RuntimeError("FFmpeg no respondió correctamente.")
+                except Exception as e:
+                    raise RuntimeError("La IA quedó lista, pero falló la verificación de FFmpeg: " + str(e))
+
                 with self.lock:
-                    self.state.update(running=False, progress=100, title="IA local lista", detail=model + " ya está instalado.")
+                    self.state.update(
+                        running=False,
+                        progress=100,
+                        title="PC lista para analizar",
+                        detail=(
+                            model
+                            + " + Whisper "
+                            + whisper["model_name"]
+                            + " ("
+                            + whisper["device"].upper()
+                            + ") verificados. Ya podés elegir un video."
+                        ),
+                        error=None,
+                    )
             except Exception as e:
                 with self.lock:
-                    self.state.update(running=False, progress=100, title="Error preparando IA", detail=str(e), error=str(e))
+                    self.state.update(
+                        running=False, progress=100,
+                        title="Error preparando la PC",
+                        detail=str(e), error=str(e)
+                    )
 
         threading.Thread(target=pull, daemon=True).start()
         return {"ok": True}
