@@ -11,12 +11,22 @@ import psutil
 import requests
 import webview
 
-from core import run_job, detect_runtime, choose_ollama_model
-
 ROOT = Path(__file__).resolve().parent
 UI = ROOT / "ui" / "index.html"
-DATA = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "VarezMultimedios"
-DATA.mkdir(parents=True, exist_ok=True)
+PREFERRED_ROOT = Path("D:/VarezMultimedios")
+DATA = PREFERRED_ROOT if Path("D:/").exists() else Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "VarezMultimedios"
+MODELS = DATA / "models"
+OUTPUTS = DATA / "outputs"
+MODELS.mkdir(parents=True, exist_ok=True)
+OUTPUTS.mkdir(parents=True, exist_ok=True)
+
+# Force the heavy model caches to D: when that drive exists.
+os.environ["HF_HOME"] = str(MODELS / "huggingface")
+os.environ["HUGGINGFACE_HUB_CACHE"] = str(MODELS / "huggingface" / "hub")
+os.environ["OLLAMA_MODELS"] = str(MODELS / "ollama")
+
+from core import run_job, detect_runtime, choose_ollama_model
+
 CONFIG_PATH = DATA / "config.json"
 
 
@@ -40,6 +50,8 @@ class API:
             "ollama_model": choose_ollama_model(),
             "whisper_gpu_model": "large-v3-turbo",
             "whisper_cpu_model": "small",
+            "models_root": str(MODELS),
+            "data_root": str(DATA),
         }
         if CONFIG_PATH.exists():
             try:
@@ -58,6 +70,8 @@ class API:
             "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
             "ollama_model": self.config["ollama_model"],
             "video": self.video_path,
+            "data_root": str(DATA),
+            "models_root": str(MODELS),
         }
 
     def pick_video(self):
@@ -190,7 +204,7 @@ class API:
 
     def open_output_folder(self):
         outs = self.state.get("outputs") or []
-        folder = Path(outs[0]).parent if outs else DATA
+        folder = Path(outs[0]).parent if outs else OUTPUTS
         os.startfile(str(folder))
         return True
 
