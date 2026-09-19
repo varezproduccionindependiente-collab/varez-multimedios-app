@@ -44,25 +44,31 @@ def duration_seconds(path: Path):
     return 0.0
 
 
-def transcribe(path: Path, config, status):
-    rt = detect_runtime(config)
-    device = "cuda" if rt["cuda"] else "cpu"
-    compute = "float16" if device == "cuda" else "int8"
-    model_name = rt["whisper_model"]
+def _run_whisper(path: Path, model_name: str, device: str, compute: str, whisper_root: Path, status):
     status(7, "Cargando Whisper…", model_name + " · " + device.upper())
-    model_root = Path(config.get("models_root") or (Path.home() / ".cache" / "varez-models"))
-    whisper_root = model_root / "whisper"
-    whisper_root.mkdir(parents=True, exist_ok=True)
-    model = WhisperModel(model_name, device=device, compute_type=compute, download_root=str(whisper_root))
-    status(12, "Transcribiendo la nota completa…", "Whisper local con timestamps palabra por palabra.")
+    model = WhisperModel(
+        model_name,
+        device=device,
+        compute_type=compute,
+        download_root=str(whisper_root),
+    )
+    status(
+        12,
+        "Transcribiendo la nota completa…",
+        "Whisper local con timestamps palabra por palabra.",
+    )
     segs, info = model.transcribe(
-        str(path), language="es",
+        str(path),
+        language="es",
         beam_size=5 if device == "cuda" else 3,
-        word_timestamps=True, vad_filter=True,
+        word_timestamps=True,
+        vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=350),
         condition_on_previous_text=True,
     )
     segments, words = [], []
+    # faster-whisper ejecuta parte del trabajo al iterar el generador,
+    # por eso este bloque también debe quedar dentro del try/fallback.
     for s in segs:
         txt = (s.text or "").strip()
         if txt:
@@ -73,6 +79,48 @@ def transcribe(path: Path, config, status):
                 words.append({"word": token, "start": float(w.start), "end": float(w.end)})
     del model
     return {"segments": segments, "words": words}
+
+
+def transcribe(path: Path, config, status):
+    rt = detect_runtime(config)
+    model_root = Path(config.get("models_root") or (Path.home() / ".cache" / "varez-models"))
+    whisper_root = model_root / "whisper"
+    whisper_root.mkdir(parents=True, exist_ok=True)
+
+    if rt["cuda"]:
+        try:
+            return _run_whisper(
+                path,
+                config["whisper_gpu_model"],
+                "cuda",
+                "float16",
+                whisper_root,
+                status,
+            )
+        except Exception as gpu_error:
+            # Una NVIDIA visible por nvidia-smi no garantiza que estén disponibles
+            # cuBLAS/cuDNN para CTranslate2. En ese caso Varez sigue en CPU.
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+            status(
+                9,
+                "GPU sin CUDA compatible · sigo por CPU",
+                "No hace falta instalar nada. Varez cambia automáticamente a Whisper "
+                + config["whisper_cpu_model"]
+                + ".",
+            )
+
+    return _run_whisper(
+        path,
+        config["whisper_cpu_model"],
+        "cpu",
+        "int8",
+        whisper_root,
+        status,
+    )
 
 
 def _fmt(t):
