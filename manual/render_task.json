@@ -1,6 +1,6 @@
 {
   "drive_file_id": "1lUYJlWAalgcsuLEhBOkEaHYFO1wob2mC",
-  "revision": "five-interesting-clips-v2-style",
+  "revision": "five-interesting-clips-v2-style-parallel",
   "clips": [
     {
       "name": "Nati_Clip_02_v2",
@@ -38,5 +38,5 @@
       "hook_end": 1700.34
     }
   ],
-  "nonce": 4
+  "nonce": 5
 }
