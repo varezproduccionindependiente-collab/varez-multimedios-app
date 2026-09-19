@@ -9,6 +9,7 @@ const LS={pin:'varez_multimedios_pin',gemini:'varez_gemini_key',groq:'varez_groq
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(sec){sec=Math.max(0,Number(sec)||0);return Math.floor(sec/60)+':'+String(Math.floor(sec%60)).padStart(2,'0')}
 function progress(p,l,d=''){p=Math.max(0,Math.min(100,Math.round(p)));S.progress=p;$('#progress').style.display='block';$('#ppct').textContent=p+'%';$('#pbar').style.width=p+'%';$('#plabel').textContent=l;$('#log').textContent=d;$('#log').className='log'}
+function resetProgressUI(hide=true){S.progress=0;$('#ppct').textContent='0%';$('#pbar').style.width='0%';$('#plabel').textContent='Preparando…';$('#log').textContent='';$('#log').className='log';if(hide)$('#progress').style.display='none'}
 function fail(msg){$('#log').textContent=msg;$('#log').className='log error';throw new Error(msg)}
 function cfg(){return{gemini:localStorage.getItem(LS.gemini)||'',groq:localStorage.getItem(LS.groq)||'',github:localStorage.getItem(LS.github)||''}}
 const JOB_KEY='varez_multimedios_job_v22';
@@ -32,6 +33,7 @@ function persistJob(){
 }
 function updateResumeUI(){
   const j=S.job;if(!j)return;
+  if(j.phase!=='rendering'&&!S.running)resetProgressUI(true);
   $('#newAnalysis').hidden=j.phase!=='done';
   const ready=j.entries.filter(e=>e?.status==='ready').length;
   const pending=j.entries.filter(e=>e?.status==='error'||(j.phase==='done'&&e?.status==='ready'&&!(j.outputPaths||[]).includes(`jobs/${j.id}/output/${j.id}-output-${String(e.clip.source_index).padStart(2,'0')}.mp4`))).length;
@@ -325,10 +327,11 @@ function showJobSummary(){
   const j=S.job,skipped=j.entries.filter(e=>e?.status==='skipped').length,errors=j.entries.filter(e=>e?.status==='error').length;
   const missing=j.entries.filter(e=>e?.status==='ready'&&!j.outputPaths?.includes(outputPath(e.clip))).length;
   const count=(j.outputPaths||[]).length;
+  resetProgressUI(true);
   $('#newAnalysis').hidden=false;
   $('#jobNotice').hidden=false;
   $('#jobNotice').textContent=`${count} clip(s) terminado(s).${skipped?' '+skipped+' fragmento(s) descartado(s) por no tener una idea completa con el gancho solicitado.':''}${errors+missing?' '+(errors+missing)+' pendiente(s); podés reintentarlos sin repetir los demás.':''}${!j.clips.length?' No se encontraron ideas completas para recortar en este material.':''}`;
-  $('#go').textContent=errors+missing?'Continuar clips pendientes':count?'Ver resultados':'Analizar otro video';
+  $('#go').textContent=errors+missing?((errors+missing)===1?'Continuar clip pendiente':'Continuar clips pendientes'):count?'Ver resultados':'Analizar otro video';
 }
 
 async function showOutputs(items){const g=$('#grid');if(g.dataset.outputs===items.map(x=>x.name).join('|'))return;g.dataset.outputs=items.map(x=>x.name).join('|');g.innerHTML='';$('#resultsTitle').textContent=`${items.length} clip${items.length===1?'':'s'} listo${items.length===1?'':'s'} para revisar`;for(let i=0;i<items.length;i++){const index=Number(items[i].name.match(/output-(\d+)\.mp4$/)?.[1]||i+1)-1,url=items[i].url,c=S.clips[index]||{};const el=document.createElement('article');el.className='clip';el.innerHTML=`<h4>${esc(c.title||'Clip '+(index+1))}</h4><p>${esc(c.reason||'')}</p>`;const v=document.createElement('video');v.controls=true;v.playsInline=true;v.preload='metadata';v.src=url;el.appendChild(v);const a=document.createElement('a');a.className='download';a.href=url;a.target='_blank';a.rel='noopener';a.download=`Varez_${String(index+1).padStart(2,'0')}_${(c.title||'clip').replace(/[^a-z0-9áéíóúñ_-]+/gi,'_')}.mp4`;a.textContent='Descargar MP4';el.appendChild(a);g.appendChild(el)}$('#results').style.display='block'}
@@ -374,7 +377,7 @@ $('#newAnalysis').onclick=()=>{
   // Keep the last completed job's references when the user deliberately starts another analysis.
   if(S.job){try{saveJob(localStorage,JOB_KEY+'_previous',S.job)}catch{}}
   S.job=null;localStorage.removeItem(JOB_KEY);$('#jobNotice').hidden=true;$('#newAnalysis').hidden=true;$('#go').textContent='Analizar y crear clips';
-  progress(0,'Nuevo análisis','Elegí el video y el pedido. Los resultados anteriores permanecen disponibles abajo.');
+  resetProgressUI(true);
 };
 S.job=loadJob(localStorage,JOB_KEY);updateResumeUI();
 ensureLogin();if(localStorage.getItem(LS.pin)==='053362'&&!ensureConfig())openSettings();
