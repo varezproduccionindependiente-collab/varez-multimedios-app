@@ -45,6 +45,13 @@ def upload_asset(release_id,path,name,ctype="application/octet-stream"):
         raise RuntimeError(f"upload {name}: {r.status_code} {r.text[:500]}")
     return r.json()
 
+def upload_signed_supabase(url,path):
+    with open(path,"rb") as f:
+        r=requests.put(url,headers={"content-type":"video/mp4","x-upsert":"true"},data=f,timeout=1800)
+    if r.status_code>=400:
+        raise RuntimeError(f"Supabase output upload -> {r.status_code}: {r.text[:500]}")
+    return True
+
 def at(sec):
     sec=max(0.0,float(sec or 0))
     h=int(sec//3600); m=int((sec%3600)//60); s=sec%60
@@ -124,7 +131,7 @@ def run_ffmpeg(src, out, ass, clip):
         "-ss",str(source_offset),"-t",str(duration),"-i",str(src),
         "-filter_complex",";".join(fc),
         "-map","[v]","-map","[a]",
-        "-c:v","libx264","-preset","veryfast","-crf","21","-pix_fmt","yuv420p",
+        "-c:v","libx264","-preset","veryfast","-crf","21","-maxrate","5600k","-bufsize","11200k","-pix_fmt","yuv420p",
         "-c:a","aac","-b:a","160k","-movflags","+faststart",str(out)
     ]
     subprocess.run(cmd,check=True)
@@ -162,10 +169,10 @@ def main():
             ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
             out=td/f"{jid}-output-{i:02d}.mp4"
             run_ffmpeg(src,out,ass,clip)
-            old=[x for x in list_assets(rid) if x["name"]==out.name]
-            for x in old: delete_asset(x["id"])
-            upload_asset(rid,out,out.name,"video/mp4")
-            made.append(out.name)
+            output_url=clip.get("output_upload_url")
+            if not output_url: raise RuntimeError(f"Falta output_upload_url para clip {i}")
+            upload_signed_supabase(output_url,out)
+            made.append(clip.get("output_path") or out.name)
         done=td/f"{jid}-done.json"
         done.write_text(json.dumps({"ok":True,"job_id":jid,"outputs":made}),encoding="utf-8")
         upload_asset(rid,done,done.name,"application/json")
