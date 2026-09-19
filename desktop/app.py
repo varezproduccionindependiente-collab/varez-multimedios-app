@@ -92,9 +92,6 @@ class API:
                 cfg.update(json.loads(CONFIG_PATH.read_text("utf-8")))
             except Exception:
                 pass
-        ram_gb = psutil.virtual_memory().total / 1024**3
-        if ram_gb < 24 and cfg.get("ollama_model") == "gpt-oss:20b":
-            cfg["ollama_model"] = "qwen3:8b"
         return cfg
 
     def _save_config(self):
@@ -125,10 +122,7 @@ class API:
         return {"path": self.video_path, "name": Path(self.video_path).name}
 
     def set_model(self, model):
-        requested = str(model)
-        if psutil.virtual_memory().total / 1024**3 < 24 and requested == "gpt-oss:20b":
-            requested = "qwen3:8b"
-        self.config["ollama_model"] = requested
+        self.config["ollama_model"] = str(model)
         self._save_config()
         return self.system_info()
 
@@ -149,10 +143,6 @@ class API:
     def prepare_ai(self):
         persist_model_paths()
         model = self.config["ollama_model"]
-        if psutil.virtual_memory().total / 1024**3 < 24 and model == "gpt-oss:20b":
-            model = "qwen3:8b"
-            self.config["ollama_model"] = model
-            self._save_config()
         try:
             requests.get("http://127.0.0.1:11434/api/tags", timeout=2).raise_for_status()
         except Exception:
