@@ -1,0 +1,57 @@
+name: Manual Varez Render Fast
+
+on:
+  push:
+    paths:
+      - "manual/render_fast_nonce.json"
+
+permissions:
+  contents: write
+
+jobs:
+  render-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          pip install gdown faster-whisper
+      - name: Download source once
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess, sys
+          task=json.loads(pathlib.Path("manual/render_task.json").read_text())
+          subprocess.run([sys.executable,"-m","gdown",task["drive_file_id"],"-O","/tmp/source.mp4"],check=True)
+          PY
+      - name: Render five clips with shared source
+        env:
+          SOURCE_PATH: /tmp/source.mp4
+        run: |
+          mkdir -p manual/output
+          CLIP_INDEX=0 python worker/manual_render.py &
+          p0=$!
+          CLIP_INDEX=1 python worker/manual_render.py &
+          p1=$!
+          CLIP_INDEX=2 python worker/manual_render.py &
+          p2=$!
+          wait $p0 $p1 $p2
+          CLIP_INDEX=3 python worker/manual_render.py &
+          p3=$!
+          CLIP_INDEX=4 python worker/manual_render.py &
+          p4=$!
+          wait $p3 $p4
+      - name: Publish clips
+        run: |
+          git config user.name "Varez Worker"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main
+          git add manual/output/*.mp4
+          git commit -m "Render FM Ciudad fast batch" || exit 0
+          git pull --rebase origin main
+          git push
