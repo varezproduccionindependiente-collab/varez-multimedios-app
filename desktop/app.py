@@ -7,6 +7,7 @@ import threading
 import uuid
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import psutil
@@ -19,8 +20,11 @@ PREFERRED_ROOT = Path("D:/VarezMultimedios")
 DATA = PREFERRED_ROOT if Path("D:/").exists() else Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "VarezMultimedios"
 MODELS = DATA / "models"
 OUTPUTS = DATA / "outputs"
+RUNTIME = DATA / "runtime"
+OLLAMA_RUNTIME = RUNTIME / "ollama"
 MODELS.mkdir(parents=True, exist_ok=True)
 OUTPUTS.mkdir(parents=True, exist_ok=True)
+OLLAMA_RUNTIME.mkdir(parents=True, exist_ok=True)
 
 # Force the heavy model caches to D: when that drive exists.
 os.environ["HF_HOME"] = str(MODELS / "huggingface")
@@ -53,6 +57,7 @@ def persist_model_paths():
 
 def find_ollama_exe():
     candidates = [
+        str(OLLAMA_RUNTIME / "ollama.exe"),
         shutil.which("ollama"),
         str(Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"),
         r"C:\Program Files\Ollama\ollama.exe",
@@ -106,7 +111,8 @@ class API:
             "video": self.video_path,
             "data_root": str(DATA),
             "models_root": str(MODELS),
-            "allow_20b": psutil.virtual_memory().total / 1024**3 >= 24,
+            "runtime_root": str(OLLAMA_RUNTIME),
+            "allow_20b": True,
         }
 
     def pick_video(self):
@@ -128,17 +134,75 @@ class API:
 
     def install_ollama(self):
         persist_model_paths()
-        try:
-            subprocess.Popen(
-                [
-                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-                    "winget install -e --id Ollama.Ollama --accept-source-agreements --accept-package-agreements",
-                ],
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-            )
-            return {"ok": True, "message": "Se abrió la instalación de Ollama. Cuando termine, volvé y tocá Preparar IA local."}
-        except Exception as e:
-            return {"ok": False, "message": str(e)}
+        existing = find_ollama_exe()
+        if existing:
+            return {"ok": True, "message": "Ollama ya está instalado en " + existing}
+
+        def install_worker():
+            with self.lock:
+                self.state.update(
+                    running=True, progress=1, title="Instalando Ollama en D:…",
+                    detail="Buscando la versión oficial más reciente.", error=None
+                )
+            try:
+                api = requests.get("https://api.github.com/repos/ollama/ollama/releases/latest", timeout=30)
+                api.raise_for_status()
+                release = api.json()
+                asset = next((a for a in release.get("assets", []) if a.get("name") == "ollama-windows-amd64.zip"), None)
+                if not asset:
+                    raise RuntimeError("No encontré el ZIP oficial de Ollama para Windows.")
+                url = asset["browser_download_url"]
+                total = int(asset.get("size") or 0)
+                zip_path = RUNTIME / "ollama-windows-amd64.zip"
+                downloaded = 0
+                with requests.get(url, stream=True, timeout=1800) as r:
+                    r.raise_for_status()
+                    if not total:
+                        total = int(r.headers.get("content-length") or 0)
+                    with open(zip_path, "wb") as f:
+                        for chunk in r.iter_content(1024 * 1024):
+                            if not chunk:
+                                continue
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            pct = int(downloaded * 78 / total) if total else 15
+                            with self.lock:
+                                self.state["progress"] = max(2, min(78, pct))
+                                self.state["detail"] = f"Descargando Ollama: {downloaded/1024**2:.0f} MB / {total/1024**2:.0f} MB" if total else f"Descargados {downloaded/1024**2:.0f} MB"
+                with self.lock:
+                    self.state.update(progress=82, title="Instalando Ollama en D:…", detail="Descomprimiendo runtime oficial.")
+                if OLLAMA_RUNTIME.exists():
+                    for p in OLLAMA_RUNTIME.iterdir():
+                        if p.is_dir():
+                            shutil.rmtree(p, ignore_errors=True)
+                        else:
+                            try: p.unlink()
+                            except Exception: pass
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(OLLAMA_RUNTIME)
+                try:
+                    zip_path.unlink()
+                except Exception:
+                    pass
+                exe = find_ollama_exe()
+                if not exe:
+                    # Some release zips contain a top-level directory; search recursively.
+                    matches = list(OLLAMA_RUNTIME.rglob("ollama.exe"))
+                    if matches:
+                        target = OLLAMA_RUNTIME / "ollama.exe"
+                        if matches[0] != target:
+                            shutil.copy2(matches[0], target)
+                        exe = str(target)
+                if not exe:
+                    raise RuntimeError("Ollama se descargó pero no encontré ollama.exe.")
+                with self.lock:
+                    self.state.update(running=False, progress=100, title="Ollama listo", detail="Instalado en " + str(OLLAMA_RUNTIME))
+            except Exception as e:
+                with self.lock:
+                    self.state.update(running=False, progress=100, title="Falló la instalación de Ollama", detail=str(e), error=str(e))
+
+        threading.Thread(target=install_worker, daemon=True).start()
+        return {"ok": True, "message": "Varez está instalando Ollama directamente en D:. Mirá el progreso dentro de la app."}
 
     def prepare_ai(self):
         persist_model_paths()
