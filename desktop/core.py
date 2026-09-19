@@ -285,17 +285,185 @@ def _transcript_text(segments):
     return "\n".join(f"[{_fmt(s['start'])}-{_fmt(s['end'])}] {s['text']}" for s in segments)
 
 
+def _clip_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "clips": {
+                "type": "array",
+                "minItems": 5,
+                "maxItems": 5,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "start": {"type": "number"},
+                        "end": {"type": "number"},
+                        "question_start": {"type": "number"},
+                        "question_end": {"type": "number"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": [
+                        "title", "start", "end",
+                        "question_start", "question_end", "reason",
+                    ],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["clips"],
+        "additionalProperties": False,
+    }
+
+
+def _parse_clip_response(payload):
+    message = payload.get("message") or {}
+    content = (message.get("content") or "").strip()
+
+    # Some Ollama/model combinations may include a fenced object even when
+    # structured output was requested. Strip the fence defensively.
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.I)
+        content = re.sub(r"\s*```$", "", content)
+
+    if not content:
+        raise ValueError("respuesta final vacía")
+
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        a, b = content.find("{"), content.rfind("}")
+        if a < 0 or b <= a:
+            raise ValueError("respuesta sin JSON")
+        parsed = json.loads(content[a:b + 1])
+
+    raw = parsed.get("clips") if isinstance(parsed, dict) else None
+    if not isinstance(raw, list) or len(raw) != 5:
+        raise ValueError("la respuesta no contiene exactamente 5 clips")
+    return raw
+
+
+def _fallback_clip_windows(transcript, total, min_dur, max_dur):
+    # Last-resort local fallback: never leave the user with a dead job merely
+    # because the editorial model returned malformed output. It builds five
+    # self-contained speech windows, spread across the note.
+    segs = [s for s in transcript.get("segments", []) if (s.get("text") or "").strip()]
+    if not segs:
+        raise RuntimeError("No hay suficiente transcripción para crear clips.")
+
+    candidates = []
+    for i, s in enumerate(segs):
+        st = float(s["start"])
+        en = float(s["end"])
+        text_parts = [(s.get("text") or "").strip()]
+        j = i + 1
+        while j < len(segs) and en - st < min_dur:
+            gap = float(segs[j]["start"]) - en
+            if gap > 2.2:
+                break
+            en = float(segs[j]["end"])
+            text_parts.append((segs[j].get("text") or "").strip())
+            j += 1
+        while j < len(segs) and en - st < min(max_dur, min_dur + 10):
+            gap = float(segs[j]["start"]) - en
+            if gap > 1.2:
+                break
+            trial_end = float(segs[j]["end"])
+            if trial_end - st > max_dur:
+                break
+            en = trial_end
+            text_parts.append((segs[j].get("text") or "").strip())
+            j += 1
+
+        dur = en - st
+        if dur < max(3.0, min_dur * 0.65):
+            continue
+        text = " ".join(x for x in text_parts if x)
+        words = text.split()
+        if len(words) < 10:
+            continue
+
+        # Prefer dense, complete-sounding speech with punctuation and useful
+        # concrete information; penalize greetings/filler.
+        lower = text.lower()
+        score = min(len(words), 90) / 12.0
+        score += 1.2 if re.search(r"[.!?…]['\"]?$", text.strip()) else 0
+        score += 0.8 if re.search(r"\b\d+[\d.,%]*\b", text) else 0
+        score += 0.5 * sum(
+            1 for cue in (
+                "porque", "entonces", "pero", "hoy", "ahora", "importante",
+                "problema", "solución", "resultado", "significa", "necesitamos",
+                "queremos", "pasó", "ocurrió", "decidimos", "vamos",
+            )
+            if cue in lower
+        )
+        score -= 2.0 * sum(
+            1 for cue in ("buen día", "buenas tardes", "gracias por venir", "cómo estás")
+            if cue in lower
+        )
+        candidates.append({
+            "start": st,
+            "end": min(total, en + 1.4),
+            "text": text,
+            "score": score,
+        })
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    chosen = []
+    for cand in candidates:
+        overlap = False
+        for prev in chosen:
+            inter = max(0.0, min(cand["end"], prev["end"]) - max(cand["start"], prev["start"]))
+            shorter = min(cand["end"] - cand["start"], prev["end"] - prev["start"])
+            if shorter > 0 and inter / shorter > 0.55:
+                overlap = True
+                break
+        if not overlap:
+            chosen.append(cand)
+        if len(chosen) == 5:
+            break
+
+    # Extremely short material may require overlap; fill remaining slots.
+    if len(chosen) < 5:
+        for cand in candidates:
+            if cand not in chosen:
+                chosen.append(cand)
+            if len(chosen) == 5:
+                break
+
+    if len(chosen) < 5:
+        step = max(1.0, total / 5.0)
+        while len(chosen) < 5:
+            idx = len(chosen)
+            st = max(0.0, min(total - 1.0, idx * step))
+            en = min(total, st + max(5.0, min(max_dur, step * 1.4)))
+            chosen.append({"start": st, "end": en, "text": "", "score": 0})
+
+    chosen.sort(key=lambda x: x["start"])
+    return [
+        {
+            "title": f"Clip {i + 1}",
+            "start": x["start"],
+            "end": x["end"],
+            "question_start": -1,
+            "question_end": -1,
+            "reason": "Selector local de respaldo",
+        }
+        for i, x in enumerate(chosen[:5])
+    ]
+
+
 def select_clips(transcript, total, options, config, status):
     model = config["ollama_model"]
     try:
         tags = requests.get(OLLAMA + "/api/tags", timeout=3)
         tags.raise_for_status()
     except Exception:
-        raise RuntimeError("Ollama no está ejecutándose. Abrilo o tocá 'Preparar IA local'.")
+        raise RuntimeError("Ollama no está ejecutándose. Abrilo o tocá 'Preparar todo'.")
 
     names = [x.get("name", "") for x in tags.json().get("models", [])]
     if not any(x == model or x.startswith(model + ":") for x in names):
-        raise RuntimeError("Falta el modelo local " + model + ". Tocá 'Preparar IA local' una sola vez.")
+        raise RuntimeError("Falta el modelo local " + model + ". Tocá 'Preparar todo' una sola vez.")
 
     if total < 45:
         min_dur, max_dur = 5, max(8, min(20, int(total * 0.7)))
@@ -312,12 +480,16 @@ def select_clips(transcript, total, options, config, status):
     else:
         min_dur, max_dur = 25, 58
         overlap = "Evitá superposiciones importantes."
+
     category = str(options.get("category", "Entrevista"))
     mode = str(options.get("mode", "auto"))
     request = str(options.get("request", "")).strip() or "ninguno"
     political = ""
     if "pol" in category.lower():
-        political = "Para contenido político, seleccioná por claridad y relevancia informativa, sin favorecer ni perjudicar actores, partidos o candidatos."
+        political = (
+            "Para contenido político, seleccioná por claridad y relevancia informativa, "
+            "sin favorecer ni perjudicar actores, partidos o candidatos."
+        )
 
     prompt = f"""
 Sos editor senior de Varez Servicios para Multimedios.
@@ -330,76 +502,97 @@ Si hay una pregunta breve antes de una buena respuesta, incluí la pregunta y ma
 El end debe quedar entre 1.3 y 2.3 segundos después de la última palabra de la idea elegida.
 Categoría: {category}. Modo: {mode}. Pedido específico: {request}.
 {political}
-Respondé SOLO JSON con exactamente esta forma:
-{{"clips":[{{"title":"...","start":0.0,"end":25.0,"question_start":-1,"question_end":-1,"reason":"..."}}]}}
-Debe haber exactamente 5 objetos.
+Devolvé solamente la estructura solicitada, con exactamente 5 clips.
 
 TRANSCRIPCIÓN:
 {_transcript_text(transcript["segments"])}
 """.strip()
 
-    status(42, "Eligiendo los 5 mejores momentos…", model + " está haciendo la selección editorial local.")
+    schema = _clip_schema()
     raw = None
     last_error = None
-    for attempt in range(2):
+
+    # gpt-oss can separate reasoning from final content. For this machine and
+    # workflow we want the final structured answer directly, so thinking is off.
+    for attempt in range(3):
         try:
-            user_prompt = prompt if attempt == 0 else (
-                prompt
-                + "\n\nIMPORTANTE: el intento anterior no respetó el formato. "
-                  "Devolvé únicamente un objeto JSON válido con exactamente 5 clips."
+            status(
+                42 + attempt,
+                "Eligiendo los 5 mejores momentos…" if attempt == 0 else "Reintentando selección editorial…",
+                model + (" · salida estructurada" if attempt == 0 else f" · intento {attempt + 1}/3"),
             )
+            user_prompt = prompt
+            if attempt:
+                user_prompt += (
+                    "\n\nEl intento anterior no produjo una respuesta estructurada válida. "
+                    "Respondé exclusivamente con los 5 clips requeridos."
+                )
+
             r = requests.post(
                 OLLAMA + "/api/chat",
                 json={
                     "model": model,
                     "stream": False,
-                    "format": "json",
+                    "think": False,
+                    "format": schema,
                     "messages": [
-                        {"role": "system", "content": "Respondé en español y respetá exactamente el JSON pedido."},
+                        {
+                            "role": "system",
+                            "content": (
+                                "Sos un editor audiovisual. Respondé únicamente con datos que "
+                                "cumplan exactamente el esquema JSON provisto."
+                            ),
+                        },
                         {"role": "user", "content": user_prompt},
                     ],
-                    "options": {"temperature": 0.10 if attempt else 0.15},
+                    "options": {
+                        "temperature": 0,
+                        "num_predict": 2200,
+                    },
                 },
                 timeout=1800,
             )
             r.raise_for_status()
-            content = r.json().get("message", {}).get("content", "")
-            a, b = content.find("{"), content.rfind("}")
-            if a < 0 or b <= a:
-                raise ValueError("respuesta sin JSON")
-            candidate = json.loads(content[a:b+1]).get("clips")
-            if not isinstance(candidate, list) or len(candidate) != 5:
-                raise ValueError("la respuesta no contiene exactamente 5 clips")
-            raw = candidate
+            raw = _parse_clip_response(r.json())
             break
         except Exception as e:
             last_error = e
-            if attempt == 0:
-                status(44, "Reintentando selección editorial…", "La IA respondió con un formato inválido; Varez lo corrige automáticamente.")
+            time.sleep(0.8)
+
     if raw is None:
-        raise RuntimeError("La IA local no pudo devolver 5 clips válidos después de reintentar: " + str(last_error))
+        status(
+            46,
+            "Usando selector de respaldo…",
+            "El modelo editorial no entregó un JSON válido. Varez sigue sin perder la transcripción.",
+        )
+        raw = _fallback_clip_windows(transcript, total, min_dur, max_dur)
 
     clips = []
-    for i, c in enumerate(raw):
-        st = max(0.0, min(float(c.get("start", 0)), max(0.0, total - 0.2)))
-        en = max(st + 0.5, min(float(c.get("end", st + min_dur)), total))
+    for i, item in enumerate(raw):
+        st = max(0.0, min(float(item.get("start", 0)), max(0.0, total - 0.2)))
+        en = max(st + 0.5, min(float(item.get("end", st + min_dur)), total))
         if en - st < min_dur:
             en = min(total, st + min_dur)
             st = max(0.0, en - min_dur)
         if en - st > max_dur + 2.5:
             en = min(total, st + max_dur + 2.0)
         en = min(total, en + 1.4)
-        qs = float(c.get("question_start", -1) or -1)
-        qe = float(c.get("question_end", -1) or -1)
+
+        qs = float(item.get("question_start", -1) or -1)
+        qe = float(item.get("question_end", -1) or -1)
         if not (st <= qs < qe < en):
             qs = qe = -1
+
         clips.append({
-            "title": str(c.get("title") or f"Clip {i+1}"),
-            "start": st, "end": en,
-            "question_start": qs, "question_end": qe,
-            "reason": str(c.get("reason") or ""),
+            "title": str(item.get("title") or f"Clip {i+1}"),
+            "start": st,
+            "end": en,
+            "question_start": qs,
+            "question_end": qe,
+            "reason": str(item.get("reason") or ""),
         })
     return clips
+
 
 
 def _ass_time(sec):
