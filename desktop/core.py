@@ -252,28 +252,45 @@ TRANSCRIPCIÓN:
 """.strip()
 
     status(42, "Eligiendo los 5 mejores momentos…", model + " está haciendo la selección editorial local.")
-    r = requests.post(
-        OLLAMA + "/api/chat",
-        json={
-            "model": model,
-            "stream": False,
-            "format": "json",
-            "messages": [
-                {"role": "system", "content": "Respondé en español y respetá exactamente el JSON pedido."},
-                {"role": "user", "content": prompt},
-            ],
-            "options": {"temperature": 0.15},
-        },
-        timeout=1800,
-    )
-    r.raise_for_status()
-    content = r.json().get("message", {}).get("content", "")
-    a, b = content.find("{"), content.rfind("}")
-    if a < 0 or b <= a:
-        raise RuntimeError("La IA local no devolvió una selección válida.")
-    raw = json.loads(content[a:b+1]).get("clips")
-    if not isinstance(raw, list) or len(raw) != 5:
-        raise RuntimeError("La IA local no devolvió exactamente 5 clips.")
+    raw = None
+    last_error = None
+    for attempt in range(2):
+        try:
+            user_prompt = prompt if attempt == 0 else (
+                prompt
+                + "\n\nIMPORTANTE: el intento anterior no respetó el formato. "
+                  "Devolvé únicamente un objeto JSON válido con exactamente 5 clips."
+            )
+            r = requests.post(
+                OLLAMA + "/api/chat",
+                json={
+                    "model": model,
+                    "stream": False,
+                    "format": "json",
+                    "messages": [
+                        {"role": "system", "content": "Respondé en español y respetá exactamente el JSON pedido."},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "options": {"temperature": 0.10 if attempt else 0.15},
+                },
+                timeout=1800,
+            )
+            r.raise_for_status()
+            content = r.json().get("message", {}).get("content", "")
+            a, b = content.find("{"), content.rfind("}")
+            if a < 0 or b <= a:
+                raise ValueError("respuesta sin JSON")
+            candidate = json.loads(content[a:b+1]).get("clips")
+            if not isinstance(candidate, list) or len(candidate) != 5:
+                raise ValueError("la respuesta no contiene exactamente 5 clips")
+            raw = candidate
+            break
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                status(44, "Reintentando selección editorial…", "La IA respondió con un formato inválido; Varez lo corrige automáticamente.")
+    if raw is None:
+        raise RuntimeError("La IA local no pudo devolver 5 clips válidos después de reintentar: " + str(last_error))
 
     clips = []
     for i, c in enumerate(raw):
