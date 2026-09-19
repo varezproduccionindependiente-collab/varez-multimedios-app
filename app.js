@@ -50,7 +50,7 @@ async function geminiSelect(fileInfo){
   const pol=S.category.toLowerCase().includes('pol')
     ?'Para contenido político, seleccioná por claridad, relevancia periodística, autosuficiencia y valor informativo. No favorezcas ni perjudiques partidos, candidatos o funcionarios; no hagas rankings ni recomendaciones electorales.'
     :'';
-  const prompt=`Sos editor senior de clips para Varez Servicios para Multimedios. Mirá y escuchá el video completo. Dura ${total.toFixed(1)} segundos. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Para ESTE video, cada clip debe durar entre ${minDur} y ${maxDur} segundos. ${overlapRule} Priorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, introducciones, relleno, respuestas que dependan de contexto externo y cortes a mitad de idea. Si una pregunta breve inmediatamente anterior mejora la respuesta, incluí la pregunta y devolvé el segundo exacto en que termina como question_end; si no, usá -1. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Todos los tiempos deben estar dentro de 0 y ${total.toFixed(1)} segundos. Devolvé segundos absolutos desde el inicio del video.`;
+  const prompt=`Sos editor senior de clips para Varez Servicios para Multimedios. Mirá y escuchá el video completo. Dura ${total.toFixed(1)} segundos. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Para ESTE video, cada clip debe durar entre ${minDur} y ${maxDur} segundos. ${overlapRule} Priorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, introducciones, relleno, respuestas que dependan de contexto externo y cortes a mitad de idea. Si hay una pregunta breve del entrevistador dentro de los 8 segundos anteriores a una buena respuesta, preferí incluirla: devolvé question_start con el inicio de esa pregunta y question_end con el segundo exacto en que termina. El campo start debe coincidir con question_start cuando la incluyas. Si no hay pregunta útil, usá -1 en ambos. IMPORTANTE: el end debe quedar al menos 1 segundo DESPUÉS de que termine de hablar la última persona, nunca cortes la última palabra ni cierres a mitad de frase. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Todos los tiempos deben estar dentro de 0 y ${total.toFixed(1)} segundos. Devolvé segundos absolutos desde el inicio del video.`;
   const body={
     contents:[{parts:[
       {text:prompt},
@@ -69,10 +69,11 @@ async function geminiSelect(fileInfo){
                 title:{type:'STRING'},
                 start:{type:'NUMBER'},
                 end:{type:'NUMBER'},
+                question_start:{type:'NUMBER'},
                 question_end:{type:'NUMBER'},
                 reason:{type:'STRING'}
               },
-              required:['title','start','end','question_end','reason']
+              required:['title','start','end','question_start','question_end','reason']
             }
           }
         },
@@ -96,12 +97,15 @@ async function geminiSelect(fileInfo){
     }
     if(en-st>maxDur)en=Math.min(total,st+maxDur);
     if(en<=st){st=Math.max(0,Math.min(st,total-1));en=total}
-    let q=Number(c.question_end??-1);
+    let qs=Number(c.question_start??-1), q=Number(c.question_end??-1);
+    if(Number.isFinite(qs)&&Number.isFinite(q)&&qs>=0&&q>qs&&q<en) st=Math.max(0,Math.min(st,qs)); else qs=-1;
     if(!Number.isFinite(q)||q<=st||q>=en)q=-1;
+    en=Math.min(total,en+1.8);
     return {
       title:String(c.title||'Clip '+(i+1)),
       start:Number(st.toFixed(2)),
       end:Number(en.toFixed(2)),
+      question_start:qs<0?-1:Number(qs.toFixed(2)),
       question_end:q<0?-1:Number(q.toFixed(2)),
       reason:String(c.reason||''),
       selected_model:c.selected_model||''
