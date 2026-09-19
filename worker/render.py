@@ -147,13 +147,18 @@ def main():
         for i,clip in enumerate(manifest["clips"],1):
             src_name=f"{jid}-source-{i:02d}.mp4"
             src=td/src_name
+            source_parts=clip.get("source_parts") or []
             source_url=clip.get("source_url")
-            if not source_url: raise RuntimeError(f"Falta source_url para clip {i}")
-            rr=requests.get(source_url,timeout=1200,stream=True)
-            rr.raise_for_status()
+            if not source_parts and source_url:
+                source_parts=[source_url]
+            if not source_parts:
+                raise RuntimeError(f"Faltan source_parts para clip {i}")
             with open(src,"wb") as f:
-                for chunk in rr.iter_content(1024*1024):
-                    if chunk: f.write(chunk)
+                for part_url in source_parts:
+                    rr=requests.get(part_url,timeout=1200,stream=True)
+                    rr.raise_for_status()
+                    for chunk in rr.iter_content(1024*1024):
+                        if chunk: f.write(chunk)
             ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
             out=td/f"{jid}-output-{i:02d}.mp4"
             run_ffmpeg(src,out,ass,clip)
