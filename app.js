@@ -37,11 +37,20 @@ async function dispatch(manifestUrl){const rel=await ensureRelease();await gh(`h
 
 async function geminiUpload(file){const key=cfg().gemini,mime=file.type||'video/mp4';progress(8,'Subiendo video a Gemini…','El video se usa solo para elegir los cinco mejores momentos.');const start=await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files',{method:'POST',headers:{'x-goog-api-key':key,'X-Goog-Upload-Protocol':'resumable','X-Goog-Upload-Command':'start','X-Goog-Upload-Header-Content-Length':String(file.size),'X-Goog-Upload-Header-Content-Type':mime,'Content-Type':'application/json'},body:JSON.stringify({file:{display_name:file.name}})});if(!start.ok)throw new Error('Gemini upload: '+start.status+' '+(await start.text()).slice(0,300));const uploadUrl=start.headers.get('x-goog-upload-url');if(!uploadUrl)throw new Error('Gemini no devolvió la URL de carga.');const up=await fetch(uploadUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':'0','X-Goog-Upload-Command':'upload, finalize','Content-Type':mime},body:file});if(!up.ok)throw new Error('Gemini upload: '+up.status+' '+(await up.text()).slice(0,300));let info=await up.json();for(let i=0;i<120&&info.file?.state==='PROCESSING';i++){progress(12,'Gemini está procesando el video…','Puede tardar unos minutos según el tamaño.');await new Promise(r=>setTimeout(r,3000));const g=await fetch('https://generativelanguage.googleapis.com/v1beta/'+info.file.name,{headers:{'x-goog-api-key':key}});if(!g.ok)throw new Error('Gemini file status: '+g.status);info={file:await g.json()}}if(info.file?.state&&info.file.state!=='ACTIVE')throw new Error('Gemini no pudo preparar el video. Estado: '+info.file.state);return info.file}
 async function geminiSelect(fileInfo){
-  progress(20,'Gemini está mirando la nota completa…','Buscando momentos que realmente funcionen como reels.');
+  progress(20,'Gemini está mirando la nota completa…','Buscando cinco momentos que realmente funcionen como reels.');
+  const total=Math.max(1,Number(S.dur)||1);
+  const short=total<150, medium=total>=150&&total<300;
+  const minDur=short?14:medium?18:25;
+  const maxDur=short?30:medium?45:58;
+  const overlapRule=short
+    ?'Como el video es corto, los cinco clips PUEDEN superponerse parcialmente si hace falta, pero cada uno debe tener un foco o idea distinta.'
+    :medium
+      ?'Evitá superposiciones grandes; una superposición breve es aceptable si permite conservar una respuesta completa.'
+      :'No superpongas los cinco clips.';
   const pol=S.category.toLowerCase().includes('pol')
     ?'Para contenido político, seleccioná por claridad, relevancia periodística, autosuficiencia y valor informativo. No favorezcas ni perjudiques partidos, candidatos o funcionarios; no hagas rankings ni recomendaciones electorales.'
     :'';
-  const prompt=`Sos editor senior de clips para Varez Servicios para Multimedios. Mirá y escuchá el video completo. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Cada uno debe durar entre 25 y 58 segundos. Priorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, introducciones, relleno, respuestas que dependan de contexto externo y cortes a mitad de idea. Si una pregunta breve inmediatamente anterior mejora la respuesta, incluí la pregunta y devolvé el segundo exacto en que termina como question_end; si no, usá -1. No superpongas los cinco clips. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Devolvé segundos absolutos desde el inicio del video.`;
+  const prompt=`Sos editor senior de clips para Varez Servicios para Multimedios. Mirá y escuchá el video completo. Dura ${total.toFixed(1)} segundos. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Para ESTE video, cada clip debe durar entre ${minDur} y ${maxDur} segundos. ${overlapRule} Priorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, introducciones, relleno, respuestas que dependan de contexto externo y cortes a mitad de idea. Si una pregunta breve inmediatamente anterior mejora la respuesta, incluí la pregunta y devolvé el segundo exacto en que termina como question_end; si no, usá -1. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Todos los tiempos deben estar dentro de 0 y ${total.toFixed(1)} segundos. Devolvé segundos absolutos desde el inicio del video.`;
   const body={
     contents:[{parts:[
       {text:prompt},
@@ -72,15 +81,40 @@ async function geminiSelect(fileInfo){
     }
   };
   const models=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite'];
-  let lastErr='';
+  let lastErr='', hadValidResponse=false;
+  const normalizeClip=(c,i)=>{
+    let st=Number(c.start), en=Number(c.end);
+    if(!Number.isFinite(st))st=(i/5)*Math.max(0,total-minDur);
+    if(!Number.isFinite(en))en=st+minDur;
+    st=Math.max(0,Math.min(st,Math.max(0,total-1)));
+    en=Math.max(st+.5,Math.min(en,total));
+    if(en-st<minDur){
+      const target=Math.min(minDur,total);
+      let center=(st+en)/2;
+      st=Math.max(0,Math.min(center-target/2,total-target));
+      en=Math.min(total,st+target);
+    }
+    if(en-st>maxDur)en=Math.min(total,st+maxDur);
+    if(en<=st){st=Math.max(0,Math.min(st,total-1));en=total}
+    let q=Number(c.question_end??-1);
+    if(!Number.isFinite(q)||q<=st||q>=en)q=-1;
+    return {
+      title:String(c.title||'Clip '+(i+1)),
+      start:Number(st.toFixed(2)),
+      end:Number(en.toFixed(2)),
+      question_end:q<0?-1:Number(q.toFixed(2)),
+      reason:String(c.reason||''),
+      selected_model:c.selected_model||''
+    };
+  };
   for(let mi=0;mi<models.length;mi++){
     const model=models[mi];
     const attempts=mi===0?2:1;
     for(let attempt=1;attempt<=attempts;attempt++){
       progress(20,`Gemini está analizando con ${model.replace('gemini-','')}…`,
-        attempt>1?'Hubo mucha demanda. Reintentando automáticamente…':
-        mi>0?'El modelo anterior estaba ocupado; cambié automáticamente al respaldo.':
-        'Buscando los 5 mejores momentos.');
+        attempt>1?'Reintentando automáticamente…':
+        mi>0?'Probando un modelo de respaldo…':
+        `Buscando 5 clips de ${minDur}–${maxDur} s para este video.`);
       let r;
       try{
         r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
@@ -102,25 +136,27 @@ async function geminiSelect(fileInfo){
         }
         throw new Error('Gemini análisis: '+lastErr);
       }
+      hadValidResponse=true;
       const d=await r.json();
       const txt=(d.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');
       let out;
-      try{out=JSON.parse(txt)}catch{lastErr='Gemini no devolvió un JSON válido.';break}
-      if(!Array.isArray(out.clips)||out.clips.length!==5){lastErr='Gemini no devolvió exactamente 5 clips.';break}
-      const clips=out.clips.map((c,i)=>({
-        title:String(c.title||'Clip '+(i+1)),
-        start:Math.max(0,Number(c.start)||0),
-        end:Math.min(S.dur,Number(c.end)||0),
-        question_end:Number(c.question_end??-1),
-        reason:String(c.reason||''),
-        selected_model:model
-      })).filter(c=>c.end>c.start+15);
+      try{out=JSON.parse(txt)}catch{
+        lastErr='Gemini no devolvió un JSON válido.';
+        if(attempt<attempts)continue;
+        break;
+      }
+      if(!Array.isArray(out.clips)||out.clips.length!==5){
+        lastErr='Gemini no devolvió exactamente 5 clips.';
+        if(attempt<attempts)continue;
+        break;
+      }
+      const clips=out.clips.map((c,i)=>normalizeClip({...c,selected_model:model},i));
       if(clips.length===5)return clips;
-      lastErr='Gemini devolvió cortes incompletos.';
-      break;
     }
   }
-  throw new Error('Gemini está con alta demanda. La app probó 3.8, 3.6 y 3.5 Flash-Lite automáticamente. Último error: '+lastErr);
+  throw new Error(hadValidResponse
+    ?'Gemini respondió, pero no pude convertir su selección en 5 clips válidos. Último detalle: '+lastErr
+    :'Gemini no estuvo disponible después de varios intentos. Último error: '+lastErr);
 }
 async function geminiDelete(fileInfo){try{await fetch('https://generativelanguage.googleapis.com/v1beta/'+fileInfo.name,{method:'DELETE',headers:{'x-goog-api-key':cfg().gemini}})}catch{}}
 
