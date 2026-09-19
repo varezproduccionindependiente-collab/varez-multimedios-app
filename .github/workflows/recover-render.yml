@@ -1,6 +1,9 @@
 name: Recover Last Varez Render
 
 on:
+  push:
+    paths:
+      - '.github/workflows/recover-render.yml'
   workflow_dispatch:
     inputs:
       release_id:
@@ -28,4 +31,4 @@ jobs:
       - name: Copy rendered MP4s to Supabase
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python worker/recover.py --release-id "${{ inputs.release_id }}" --job-id "${{ inputs.job_id }}"
+        run: python worker/recover.py --release-id "${{ inputs.release_id || '391909862' }}" --job-id "${{ inputs.job_id || '936968b13c1c4fe5' }}"
