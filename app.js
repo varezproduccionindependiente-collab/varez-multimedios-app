@@ -33,7 +33,7 @@ function persistJob(){
 }
 function updateResumeUI(){
   const j=S.job;if(!j)return;
-  if(j.phase!=='rendering'&&!S.running)resetProgressUI(true);
+  if(j.phase==='done'||(j.phase!=='rendering'&&!S.running))resetProgressUI(true);
   $('#newAnalysis').hidden=j.phase!=='done';
   const ready=j.entries.filter(e=>e?.status==='ready').length;
   const pending=j.entries.filter(e=>e?.status==='error'||(j.phase==='done'&&e?.status==='ready'&&!(j.outputPaths||[]).includes(`jobs/${j.id}/output/${j.id}-output-${String(e.clip.source_index).padStart(2,'0')}.mp4`))).length;
@@ -41,7 +41,7 @@ function updateResumeUI(){
   $('#jobNotice').textContent=j.phase==='rendering'?'La edición ya está en marcha. Podés volver a consultar el resultado.':
     j.phase==='done'?`${(j.outputPaths||[]).length} clip(s) entregado(s). ${pending?pending+' pendiente(s). Elegí «'+j.fileName+'» para retomarlos.':'Podés elegir otro video.'}`:
     `Trabajo guardado: ${ready} clip(s) preparado(s). ${S.file?'Tocá continuar para retomar.':'Elegí nuevamente «'+j.fileName+'» para continuar.'}`;
-  $('#go').textContent=j.phase==='rendering'?'Ver avance de la edición':pending?'Continuar clips pendientes':j.phase==='done'?'Ver resultados':'Continuar trabajo';
+  $('#go').textContent=j.phase==='rendering'?'Ver avance de la edición':pending?(pending===1?'Continuar clip pendiente':'Continuar clips pendientes'):j.phase==='done'?'Ver resultados':'Continuar trabajo';
 }
 async function fileSignature(file){
   const data=await new Blob([file.slice(0,65536),file.slice(Math.max(0,file.size-65536))]).arrayBuffer();
