@@ -14,21 +14,42 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            manual/qc_task.json
+            manual/render_task.json
+            manual/qc_report.json
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+      - name: Download only selected clips
+        run: |
+          mkdir -p /tmp/hd /tmp/preview
+          python - <<'PY' > /tmp/names.txt
+          import json
+          from pathlib import Path
+          d=json.loads(Path("manual/qc_task.json").read_text())
+          for n in d["clips"]: print(n)
+          PY
+          while read -r n; do
+            curl -fL --retry 3 "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/manual/output/${n}.mp4" -o "/tmp/hd/${n}.mp4" &
+            curl -fL --retry 3 "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/manual/previews/${n}_preview.mp4" -o "/tmp/preview/${n}_preview.mp4" &
+          done < /tmp/names.txt
+          wait
       - name: Validate clips
         run: |
           python - <<'PY'
-          import json, subprocess, pathlib, re, math
+          import json, subprocess, pathlib, re
           task=json.loads(pathlib.Path("manual/qc_task.json").read_text())
           render=json.loads(pathlib.Path("manual/render_task.json").read_text())
           spec={c["name"]:c for c in render["clips"]}
           report={"ok":True,"clips":[]}
           for name in task["clips"]:
-              hd=pathlib.Path("manual/output")/(name+".mp4")
-              pv=pathlib.Path("manual/previews")/(name+"_preview.mp4")
+              hd=pathlib.Path("/tmp/hd")/(name+".mp4")
+              pv=pathlib.Path("/tmp/preview")/(name+"_preview.mp4")
               item={"name":name,"checks":{},"issues":[]}
               for label,path,expected_wh in [("hd",hd,(1080,1920)),("preview",pv,(540,960))]:
                   if not path.exists():
@@ -54,8 +75,7 @@ jobs:
                   item["checks"][label+"_fps"]=round(fpsv,3)
                   dur=float(meta.get("format",{}).get("duration") or 0)
                   item["checks"][label+"_duration"]=round(dur,3)
-                  size=int(meta.get("format",{}).get("size") or 0)
-                  item["checks"][label+"_size_bytes"]=size
+                  item["checks"][label+"_size_bytes"]=int(meta.get("format",{}).get("size") or 0)
                   if (w,h)!=expected_wh: item["issues"].append(f"{label} wrong resolution {w}x{h}")
                   if vs.get("codec_name")!="h264": item["issues"].append(f"{label} video codec {vs.get('codec_name')}")
                   if aus.get("codec_name")!="aac": item["issues"].append(f"{label} audio codec {aus.get('codec_name')}")
@@ -71,8 +91,7 @@ jobs:
                       "ffmpeg","-hide_banner","-i",str(hd),"-af","silencedetect=noise=-45dB:d=1.0",
                       "-f","null","-"
                   ],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
-                  silences=re.findall(r"silence_duration: ([0-9.]+)",p.stderr)
-                  long_s=[float(x) for x in silences if float(x)>=1.0]
+                  long_s=[float(x) for x in re.findall(r"silence_duration: ([0-9.]+)",p.stderr) if float(x)>=1.0]
                   item["checks"]["silences_over_1s"]=long_s
                   if long_s: item["issues"].append(f"long silence(s): {long_s}")
               item["ok"]=not item["issues"]
@@ -88,8 +107,10 @@ jobs:
         run: |
           git config user.name "Varez Worker"
           git config user.email "actions@users.noreply.github.com"
+          git stash push -u -m "varez-qc" || true
           git pull --rebase origin main
-          git add manual/qc_report.json
+          git stash pop || true
+          git add --sparse manual/qc_report.json
           git commit -m "Add FM Ciudad clip QC report" || exit 0
           git pull --rebase origin main
           git push
