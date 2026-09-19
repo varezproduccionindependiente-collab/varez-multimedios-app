@@ -10,7 +10,7 @@ job_id=task["job_id"]
 src=Path("/tmp/source.mp4")
 audio=Path("/tmp/audio.mp3")
 
-sh([sys.executable,"-m","gdown","--id",file_id,"-O",str(src)])
+sh([sys.executable,"-m","gdown",file_id,"-O",str(src)])
 probe=subprocess.check_output([
     "ffprobe","-v","error","-show_entries","format=duration:stream=width,height",
     "-of","json",str(src)
