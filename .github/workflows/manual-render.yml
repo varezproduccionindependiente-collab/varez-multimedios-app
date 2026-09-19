@@ -10,6 +10,10 @@ permissions:
 
 jobs:
   render:
+    strategy:
+      fail-fast: false
+      matrix:
+        clip_index: [0,1,2,3,4]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -23,13 +27,33 @@ jobs:
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           pip install gdown faster-whisper
       - name: Render Varez clip
+        env:
+          CLIP_INDEX: ${{ matrix.clip_index }}
         run: python worker/manual_render.py
-      - name: Publish clip
+      - name: Upload rendered clip
+        uses: actions/upload-artifact@v4
+        with:
+          name: vclip-${{ matrix.clip_index }}
+          path: manual/output/*.mp4
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vclip-*
+          path: manual/output
+          merge-multiple: true
+      - name: Publish clips
         run: |
           git config user.name "Varez Worker"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase origin main
-          git add manual/output/Nati_Clip_02_v2.mp4 manual/output/Nati_Clip_03_v2.mp4 manual/output/Nati_Clip_04_v2.mp4 manual/output/Nati_Clip_05_v2.mp4 manual/output/Nati_Clip_06_v2.mp4
-          git commit -m "Render five Nati Varez clips" || exit 0
+          git add manual/output/*.mp4
+          git commit -m "Render Nati Varez clip batch" || exit 0
           git pull --rebase origin main
           git push
