@@ -1,42 +1,42 @@
 {
   "drive_file_id": "15GecvyjJUdZCvGcumXjdzURCqlQqohKt",
-  "revision": "fmciudad-20260919-five-clips-varez-v2-short-hooks",
+  "revision": "fmciudad-audicion-5clips-varez-v2",
   "clips": [
     {
-      "name": "FM_Clip_01_Vertigo_vs_Mareo_v2",
+      "name": "FM_Ciudad_Clip_01_Vertigo_vs_Mareo",
       "body_start": 94.0,
       "body_end": 149.0,
       "hook_start": 114.0,
       "hook_end": 122.0
     },
     {
-      "name": "FM_Clip_02_Zumbidos_Acufenos_v2",
-      "body_start": 492.0,
-      "body_end": 595.0,
-      "hook_start": 588.0,
-      "hook_end": 595.0
+      "name": "FM_Ciudad_Clip_02_Panico_vs_Vertigo",
+      "body_start": 249.0,
+      "body_end": 336.0,
+      "hook_start": 262.0,
+      "hook_end": 269.0
     },
     {
-      "name": "FM_Clip_03_Perdida_Auditiva_Jovenes_v2",
-      "body_start": 715.0,
+      "name": "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado",
+      "body_start": 406.0,
+      "body_end": 492.0,
+      "hook_start": 433.0,
+      "hook_end": 440.0
+    },
+    {
+      "name": "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes",
+      "body_start": 711.0,
       "body_end": 797.0,
       "hook_start": 752.0,
       "hook_end": 762.0
     },
     {
-      "name": "FM_Clip_04_Estres_Perdida_Audicion_v2",
-      "body_start": 964.0,
-      "body_end": 1055.0,
-      "hook_start": 1023.0,
-      "hook_end": 1028.0
-    },
-    {
-      "name": "FM_Clip_05_Celular_Lenguaje_Ninos_v2",
-      "body_start": 1554.0,
-      "body_end": 1634.0,
-      "hook_start": 1598.0,
-      "hook_end": 1608.0
+      "name": "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia",
+      "body_start": 1023.0,
+      "body_end": 1056.0,
+      "hook_start": 1039.0,
+      "hook_end": 1048.0
     }
   ],
-  "nonce": 7
+  "nonce": 6
 }
