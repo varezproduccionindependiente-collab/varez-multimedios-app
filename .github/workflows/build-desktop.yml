@@ -1,0 +1,50 @@
+name: Build Varez Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/build-desktop.yml'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r desktop/requirements.txt
+          pip install pyinstaller
+      - name: Build desktop app
+        shell: cmd
+        run: >
+          pyinstaller --noconfirm --clean --windowed
+          --name VarezMultimedios
+          --paths desktop
+          --add-data "desktop\ui;ui"
+          --collect-all faster_whisper
+          --collect-all ctranslate2
+          --collect-all av
+          --collect-all imageio_ffmpeg
+          desktop\app.py
+      - name: Add installer helpers
+        shell: powershell
+        run: |
+          Copy-Item desktop\install.ps1 dist\VarezMultimedios\install.ps1
+          Copy-Item desktop\start.bat dist\VarezMultimedios\start.bat
+          Copy-Item desktop\requirements.txt dist\VarezMultimedios\requirements.txt
+          Copy-Item desktop\README.md dist\VarezMultimedios\README.md
+      - name: Zip
+        shell: powershell
+        run: Compress-Archive -Path dist\VarezMultimedios\* -DestinationPath VarezMultimedios-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VarezMultimedios-Windows
+          path: VarezMultimedios-Windows.zip
+          retention-days: 30
