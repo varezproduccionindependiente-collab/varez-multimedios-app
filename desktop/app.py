@@ -69,6 +69,39 @@ def find_ollama_exe():
     return None
 
 
+def ensure_ollama_server():
+    try:
+        requests.get("http://127.0.0.1:11434/api/tags", timeout=2).raise_for_status()
+        return True, None
+    except Exception:
+        pass
+
+    exe = find_ollama_exe()
+    if not exe:
+        return False, "Ollama no está instalado todavía."
+
+    try:
+        env = os.environ.copy()
+        env["OLLAMA_MODELS"] = str(MODELS / "ollama")
+        subprocess.Popen(
+            [exe, "serve"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for _ in range(16):
+            time.sleep(0.5)
+            try:
+                requests.get("http://127.0.0.1:11434/api/tags", timeout=1).raise_for_status()
+                return True, None
+            except Exception:
+                pass
+        return False, "Ollama está instalado pero no pudo iniciar."
+    except Exception as e:
+        return False, "No pude iniciar Ollama: " + str(e)
+
+
 class API:
     def __init__(self):
         persist_model_paths()
@@ -208,33 +241,9 @@ class API:
     def prepare_ai(self):
         persist_model_paths()
         model = self.config["ollama_model"]
-        try:
-            requests.get("http://127.0.0.1:11434/api/tags", timeout=2).raise_for_status()
-        except Exception:
-            exe = find_ollama_exe()
-            if not exe:
-                return {"ok": False, "message": "Ollama todavía se está instalando. Esperá a que termine y volvé a tocar Preparar IA local."}
-            try:
-                env = os.environ.copy()
-                env["OLLAMA_MODELS"] = str(MODELS / "ollama")
-                subprocess.Popen(
-                    [exe, "serve"],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                for _ in range(10):
-                    time.sleep(0.5)
-                    try:
-                        requests.get("http://127.0.0.1:11434/api/tags", timeout=1).raise_for_status()
-                        break
-                    except Exception:
-                        pass
-                else:
-                    return {"ok": False, "message": "Ollama está instalado pero todavía no pudo iniciar. Cerrá y abrí Varez e intentá otra vez."}
-            except Exception as e:
-                return {"ok": False, "message": "No pude iniciar Ollama: " + str(e)}
+        ok, err = ensure_ollama_server()
+        if not ok:
+            return {"ok": False, "message": err}
 
         def pull():
             with self.lock:
@@ -291,6 +300,10 @@ class API:
 
         def worker():
             try:
+                status(2, "Verificando motor local…", "Comprobando Ollama y modelos antes de analizar.")
+                ok, err = ensure_ollama_server()
+                if not ok:
+                    raise RuntimeError(err)
                 outputs = run_job(
                     video_path=Path(self.video_path),
                     job_id=job_id,
