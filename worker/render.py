@@ -104,7 +104,7 @@ def run_ffmpeg(src, out, ass, clip):
     captions=bool(clip.get("captions",True))
     qa=bool(clip.get("qa",True)) and q>.7 and q<duration-.7
 
-    base="setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    base="setpts=PTS-STARTPTS,fps=30,settb=AVTB,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     fc=[]
     if qa:
         transition=max(.18,min(.38,q-.25,duration-q-.25))
@@ -151,31 +151,34 @@ def main():
         r.raise_for_status()
         mpath.write_bytes(r.content)
         manifest=json.loads(mpath.read_text("utf-8"))
-        made=[]
+        made=[]; errors=[]
         for i,clip in enumerate(manifest["clips"],1):
-            src_name=f"{jid}-source-{i:02d}.mp4"
-            src=td/src_name
-            source_parts=clip.get("source_parts") or []
-            source_url=clip.get("source_url")
-            if not source_parts and source_url:
-                source_parts=[source_url]
-            if not source_parts:
-                raise RuntimeError(f"Faltan source_parts para clip {i}")
-            with open(src,"wb") as f:
-                for part_url in source_parts:
-                    rr=requests.get(part_url,timeout=1200,stream=True)
-                    rr.raise_for_status()
-                    for chunk in rr.iter_content(1024*1024):
-                        if chunk: f.write(chunk)
-            ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
-            out=td/f"{jid}-output-{i:02d}.mp4"
-            run_ffmpeg(src,out,ass,clip)
-            output_url=clip.get("output_upload_url")
-            if not output_url: raise RuntimeError(f"Falta output_upload_url para clip {i}")
-            upload_signed_supabase(output_url,out)
-            made.append(clip.get("output_path") or out.name)
-        done=td/f"{jid}-done.json"
-        done.write_text(json.dumps({"ok":True,"job_id":jid,"outputs":made}),encoding="utf-8")
+            try:
+                src=td/f"{jid}-source-{i:02d}.mp4"
+                source_parts=clip.get("source_parts") or ([clip["source_url"]] if clip.get("source_url") else [])
+                if not source_parts:
+                    raise RuntimeError(f"Falta la fuente para clip {i}")
+                with open(src,"wb") as f:
+                    for part_url in source_parts:
+                        rr=requests.get(part_url,timeout=1200,stream=True)
+                        rr.raise_for_status()
+                        for chunk in rr.iter_content(1024*1024):
+                            if chunk: f.write(chunk)
+                ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
+                out=td/f"{jid}-output-{i:02d}.mp4"
+                run_ffmpeg(src,out,ass,clip)
+                output_url=clip.get("output_upload_url")
+                if not output_url: raise RuntimeError(f"Falta el destino para clip {i}")
+                upload_signed_supabase(output_url,out)
+                made.append(clip.get("output_path") or out.name)
+            except Exception as error:
+                index=clip.get("source_index",i)
+                errors.append({"source_index":index,"error":type(error).__name__})
+                print(f"Clip {index} pendiente: {type(error).__name__}. Continúan los demás.",file=sys.stderr)
+        render_id=manifest.get("render_id") or jid
+        if not re.fullmatch(r"[a-zA-Z0-9-]+",render_id): raise ValueError("render_id inválido")
+        done=td/f"{render_id}-done.json"
+        done.write_text(json.dumps({"ok":not errors,"job_id":jid,"outputs":made,"errors":errors}),encoding="utf-8")
         upload_asset(rid,done,done.name,"application/json")
 
 if __name__=="__main__":
