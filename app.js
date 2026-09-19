@@ -50,13 +50,21 @@ async function geminiSelect(fileInfo){
   const pol=S.category.toLowerCase().includes('pol')
     ?'Para contenido político, seleccioná por claridad, relevancia periodística, autosuficiencia y valor informativo. No favorezcas ni perjudiques partidos, candidatos o funcionarios; no hagas rankings ni recomendaciones electorales.'
     :'';
-  const prompt=`Sos editor senior de clips para Varez Servicios para Multimedios. Mirá y escuchá el video completo. Dura ${total.toFixed(1)} segundos. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Para ESTE video, cada clip debe durar entre ${minDur} y ${maxDur} segundos. ${overlapRule} Priorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, introducciones, relleno, respuestas que dependan de contexto externo y cortes a mitad de idea. Si hay una pregunta breve del entrevistador dentro de los 8 segundos anteriores a una buena respuesta, preferí incluirla: devolvé question_start con el inicio de esa pregunta y question_end con el segundo exacto en que termina. El campo start debe coincidir con question_start cuando la incluyas. Si no hay pregunta útil, usá -1 en ambos. IMPORTANTE: el end debe quedar al menos 1 segundo DESPUÉS de que termine de hablar la última persona, nunca cortes la última palabra ni cierres a mitad de frase. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Todos los tiempos deben estar dentro de 0 y ${total.toFixed(1)} segundos. Devolvé segundos absolutos desde el inicio del video.`;
+  const editorialRules=`Tu criterio debe ser el de un editor humano exigente, no el de un buscador de frases sueltas.
+Cada clip tiene que contar una mini historia completa: planteo o contexto suficiente, desarrollo y remate/cierre. Debe entenderse sin haber visto la entrevista completa.
+INICIO: empezá antes de la primera palabra de una oración o pregunta completa. Nunca arranques a mitad de palabra, a mitad de oración, ni con una respuesta huérfana como "sí", "no", "también", "porque", "entonces", "pero", "él", "ella", "eso" o "esto" si el referente no se entiende. Conservá una respiración breve antes de la primera palabra.
+FINAL: terminá después de la última palabra que cierra la idea y antes de que comience una idea nueva. Nunca cierres en conectores o promesas de continuación como "y", "pero", "porque", "entonces", "además", "por eso", "yo creo que", "lo que pasa es". No incluyas las primeras palabras del tema siguiente. Dejá solamente entre 0.25 y 0.65 segundos de aire luego del cierre; no agregues segundos de relleno.
+GANCHO INICIAL OBLIGATORIO: elegí un comienzo con una afirmación contundente, completa y autosuficiente del protagonista. NO uses la pregunta del entrevistador como gancho. La frase inicial del protagonista irá en blanco y negro y audio telefónico; después continúa su desarrollo en color y audio normal, sin cambiar el orden ni el sentido. Si la respuesta necesita una pregunta para entenderse, elegí otro comienzo autosuficiente. Devolvé hook_end como el segundo absoluto donde termina esa frase contundente completa (no un número fijo de segundos) y hook_closing_words como sus últimas 5 a 12 palabras textuales. Tiene que quedar desarrollo después del gancho. Para estos clips question_start y question_end son -1.
+SELECCIÓN: preferí una idea completa de 28 segundos antes que una idea más llamativa cortada o inflada a 45. La duración es un rango, no una obligación de rellenar. Rechazá todo fragmento que requiera contexto exterior o que no tenga cierre natural.
+PRECISIÓN: opening_words debe copiar literalmente las primeras 5 a 12 palabras habladas del clip y closing_words las últimas 5 a 12. Esas citas se usarán para ajustar el corte con la transcripción.`;
+  const prompt=`Sos el editor senior de Varez Servicios para Multimedios. Mirá y escuchá el video completo, que dura ${total.toFixed(1)} segundos. Elegí EXACTAMENTE 5 fragmentos distintos que funcionen como reels por sí solos. Para este video, cada clip debe durar entre ${minDur} y ${maxDur} segundos. ${overlapRule}\n${editorialRules}\nPriorizá respuestas completas, frases memorables, datos concretos, consecuencias, explicaciones claras, emoción, sorpresa o humor según el contenido. Evitá saludos, presentaciones y relleno. Si incluís una pregunta, devolvé question_start y question_end exactos, y start debe coincidir con question_start. Si no hay pregunta útil, usá -1 en ambos. Categoría: ${S.category}. Modo: ${S.mode}. Pedido específico: ${$('#request').value.trim()||'ninguno'}. ${pol} Todos los tiempos deben estar dentro de 0 y ${total.toFixed(1)} segundos y ser absolutos desde el inicio del video. En boundary_check explicá brevemente por qué el comienzo es autosuficiente y por qué el final cierra la idea.`;
   const body={
     contents:[{parts:[
       {text:prompt},
       {file_data:{mime_type:fileInfo.mimeType||S.file.type||'video/mp4',file_uri:fileInfo.uri}}
     ]}],
     generationConfig:{
+      temperature:0.25,
       responseMimeType:'application/json',
       responseSchema:{
         type:'OBJECT',
@@ -71,9 +79,14 @@ async function geminiSelect(fileInfo){
                 end:{type:'NUMBER'},
                 question_start:{type:'NUMBER'},
                 question_end:{type:'NUMBER'},
+                hook_end:{type:'NUMBER'},
+                hook_closing_words:{type:'STRING'},
+                opening_words:{type:'STRING'},
+                closing_words:{type:'STRING'},
+                boundary_check:{type:'STRING'},
                 reason:{type:'STRING'}
               },
-              required:['title','start','end','question_start','question_end','reason']
+              required:['title','start','end','question_start','question_end','hook_end','hook_closing_words','opening_words','closing_words','boundary_check','reason']
             }
           }
         },
@@ -89,24 +102,21 @@ async function geminiSelect(fileInfo){
     if(!Number.isFinite(en))en=st+minDur;
     st=Math.max(0,Math.min(st,Math.max(0,total-1)));
     en=Math.max(st+.5,Math.min(en,total));
-    if(en-st<minDur){
-      const target=Math.min(minDur,total);
-      let center=(st+en)/2;
-      st=Math.max(0,Math.min(center-target/2,total-target));
-      en=Math.min(total,st+target);
-    }
-    if(en-st>maxDur)en=Math.min(total,st+maxDur);
     if(en<=st){st=Math.max(0,Math.min(st,total-1));en=total}
     let qs=Number(c.question_start??-1), q=Number(c.question_end??-1);
     if(Number.isFinite(qs)&&Number.isFinite(q)&&qs>=0&&q>qs&&q<en) st=Math.max(0,Math.min(st,qs)); else qs=-1;
     if(!Number.isFinite(q)||q<=st||q>=en)q=-1;
-    en=Math.min(total,en+1.8);
     return {
       title:String(c.title||'Clip '+(i+1)),
       start:Number(st.toFixed(2)),
       end:Number(en.toFixed(2)),
       question_start:qs<0?-1:Number(qs.toFixed(2)),
       question_end:q<0?-1:Number(q.toFixed(2)),
+      hook_end:Number(c.hook_end),
+      hook_closing_words:String(c.hook_closing_words||''),
+      opening_words:String(c.opening_words||''),
+      closing_words:String(c.closing_words||''),
+      boundary_check:String(c.boundary_check||''),
       reason:String(c.reason||''),
       selected_model:c.selected_model||''
     };
@@ -154,6 +164,26 @@ async function geminiSelect(fileInfo){
         if(attempt<attempts)continue;
         break;
       }
+      progress(27,'Revisión editorial final…','Otro pase comprueba que ningún clip empiece o termine a mitad de una idea.');
+      const reviewPrompt=`Actuá ahora como jefe de edición y auditá estas cinco selecciones preliminares contra el video completo:\n${JSON.stringify(out.clips)}\n\n${editorialRules}\nCorregí o reemplazá cualquier clip que empiece sin contexto, arranque a mitad de oración, termine con una frase inconclusa, alcance a incluir el comienzo del tema siguiente, tenga relleno o dependa de información exterior. Escuchá el audio alrededor de cada borde: start debe quedar apenas antes de la primera palabra completa y end entre 0.25 y 0.65 segundos después de la última palabra del cierre, antes de la oración siguiente. Conservá exactamente cinco clips fuertes y distintos dentro de ${minDur}–${maxDur} segundos. Si para cerrar bien una idea hay que elegir otro momento, reemplazalo. No apruebes mecánicamente la propuesta anterior. Reescribí opening_words y closing_words copiando literalmente lo que se oye en los límites finales. Devolvé únicamente el JSON solicitado.`;
+      const reviewBody=JSON.parse(JSON.stringify(body));
+      reviewBody.contents=[{parts:[
+        {text:reviewPrompt},
+        {file_data:{mime_type:fileInfo.mimeType||S.file.type||'video/mp4',file_uri:fileInfo.uri}}
+      ]}];
+      try{
+        const rr=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
+          method:'POST',
+          headers:{'x-goog-api-key':cfg().gemini,'Content-Type':'application/json'},
+          body:JSON.stringify(reviewBody)
+        });
+        if(rr.ok){
+          const rd=await rr.json();
+          const rtxt=(rd.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');
+          const reviewed=JSON.parse(rtxt);
+          if(Array.isArray(reviewed.clips)&&reviewed.clips.length===5)out=reviewed;
+        }
+      }catch(e){console.warn('La revisión editorial usará la primera selección:',e)}
       const clips=out.clips.map((c,i)=>normalizeClip({...c,selected_model:model},i));
       if(clips.length===5)return clips;
     }
@@ -187,7 +217,84 @@ function inferQuestionEnd(words,declared=0){
   }
   return 0;
 }
-async function prepareOne(c,i){const ff=await getFF(),dur=c.end-c.start,srcStart=Math.max(0,c.start-4),srcEnd=Math.min(S.dur,c.end+4),srcDur=srcEnd-srcStart;const audio=`/a${i}.mp3`,source=`/s${i}.mp4`;let r=await ff.exec(['-ss',String(c.start),'-t',String(dur),'-i','/input/'+S.file.name,'-vn','-ac','1','-ar','16000','-c:a','libmp3lame','-b:a','64k',audio],10*60*1000);if(r!==0)throw new Error('No pude extraer el audio del clip '+(i+1));const ab=await ff.read(audio);await ff.del(audio);const words=await groqWords(ab,i);const declaredQ=c.question_end>=c.start&&c.question_end<c.end?c.question_end-c.start:0;const qRel=inferQuestionEnd(words,declaredQ);progress(40+i*7,'Preparando fuente '+(i+1)+'/5…',qRel>0?'Pregunta detectada: se aplicará B&N + audio telefónico.':'Corte rápido del video original.');r=await ff.exec(['-ss',String(srcStart),'-t',String(srcDur),'-i','/input/'+S.file.name,'-map','0:v:0','-map','0:a?','-c','copy','-movflags','+faststart',source],10*60*1000);if(r!==0){r=await ff.exec(['-ss',String(srcStart),'-t',String(srcDur),'-i','/input/'+S.file.name,'-vf','scale=1920:1920:force_original_aspect_ratio=decrease','-c:v','libx264','-preset','ultrafast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',source],20*60*1000);if(r!==0)throw new Error('No pude preparar el video del clip '+(i+1))}const vb=await ff.read(source);await ff.del(source);const baseName=`${S.jobId}-source-${String(i+1).padStart(2,'0')}`;progress(44+i*7,'Subiendo fragmento '+(i+1)+'/5…','Lo divido en partes pequeñas para mantener la calidad sin superar el límite gratuito.');const bytes=vb instanceof Uint8Array?vb:new Uint8Array(vb);const PART=24*1024*1024,source_parts=[];for(let off=0,p=0;off<bytes.byteLength;off+=PART,p++){const chunk=bytes.slice(off,Math.min(bytes.byteLength,off+PART));const name=`${baseName}.part${String(p+1).padStart(3,'0')}`;const staged=await cloudUpload(name,new Blob([chunk],{type:'application/octet-stream'}),'application/octet-stream');source_parts.push(staged.url)}return{...c,source_parts,source_offset:c.start-srcStart,question_end_rel:qRel,words,captions:S.settings.captions,qa:S.settings.qa,reframe:S.settings.reframe}}
+function cleanToken(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñü]+/g,'')}
+function lcsLength(a,b){const row=new Array(b.length+1).fill(0);for(const x of a){let prev=0;for(let j=1;j<=b.length;j++){const old=row[j];row[j]=x===b[j-1]?prev+1:Math.max(row[j],row[j-1]);prev=old}}return row[b.length]}
+function findQuotedWords(words,quote,preferredTime){
+  const wanted=String(quote||'').split(/\s+/).map(cleanToken).filter(Boolean);
+  if(wanted.length<2)return null;
+  let best=null;
+  for(let i=0;i<words.length;i++){
+    for(let len=Math.max(2,wanted.length-2);len<=Math.min(words.length-i,wanted.length+3);len++){
+      const got=words.slice(i,i+len).map(x=>cleanToken(x.word)).filter(Boolean);
+      if(!got.length)continue;
+      const matches=lcsLength(wanted,got),similarity=matches/Math.max(wanted.length,got.length);
+      const midpoint=(Number(words[i].start)+Number(words[i+len-1].end))/2;
+      const score=similarity-Math.min(.28,Math.abs(midpoint-preferredTime)*.018);
+      if(!best||score>best.score)best={startIndex:i,endIndex:i+len-1,matches,similarity,score};
+    }
+  }
+  return best&&best.matches>=2&&best.similarity>=.5?best:null;
+}
+function alignClipBoundaries(c,contextStart,contextWords){
+  const desiredStart=c.start-contextStart,desiredEnd=c.end-contextStart;
+  const first=findQuotedWords(contextWords,c.opening_words,desiredStart);
+  const last=findQuotedWords(contextWords,c.closing_words,desiredEnd);
+  let start=c.start,end=c.end;
+  if(first&&Math.abs(Number(contextWords[first.startIndex].start)-desiredStart)<=4){
+    start=contextStart+Math.max(0,Number(contextWords[first.startIndex].start)-.14);
+  }
+  if(last&&(!first||last.endIndex>=first.startIndex)&&Math.abs(Number(contextWords[last.endIndex].end)-desiredEnd)<=4){
+    const spokenEnd=Number(contextWords[last.endIndex].end);
+    const next=contextWords[last.endIndex+1];
+    const gap=next?Math.max(.12,Number(next.start)-spokenEnd):.45;
+    const hold=Math.min(.45,Math.max(.12,gap*.58));
+    end=contextStart+spokenEnd+hold;
+  }
+  start=Math.max(0,Math.min(start,S.dur-.5));
+  end=Math.min(S.dur,Math.max(start+.5,end));
+  return{start:Number(start.toFixed(3)),end:Number(end.toFixed(3))};
+}
+function inferIntroEnd(words,declared=0,duration=0){
+  const q=inferQuestionEnd(words,declared);
+  if(q>.7&&q<duration-.7)return q;
+  const usable=(words||[]).filter(w=>Number(w.end)>=1.6&&Number(w.end)<=Math.min(5.5,duration-1));
+  if(!usable.length)return Math.min(3,Math.max(.8,duration*.2));
+  for(const w of usable){
+    const idx=words.indexOf(w),next=words[idx+1],gap=next?Number(next.start)-Number(w.end):0;
+    if(/[.!?…]$/.test(String(w.word||''))||gap>.48)return Number(w.end);
+  }
+  return Number(usable.reduce((best,w)=>Math.abs(Number(w.end)-3.2)<Math.abs(Number(best.end)-3.2)?w:best).end);
+}
+async function prepareOne(c,i){
+  const ff=await getFF();
+  const contextStart=Math.max(0,c.start-3),contextEnd=Math.min(S.dur,c.end+3),contextDur=contextEnd-contextStart;
+  const audio=`/a${i}.mp3`,source=`/s${i}.mp4`;
+  let r=await ff.exec(['-ss',String(contextStart),'-t',String(contextDur),'-i','/input/'+S.file.name,'-vn','-ac','1','-ar','16000','-c:a','libmp3lame','-b:a','64k',audio],10*60*1000);
+  if(r!==0)throw new Error('No pude extraer el audio del clip '+(i+1));
+  const ab=await ff.read(audio);await ff.del(audio);
+  const contextWords=await groqWords(ab,i);
+  const aligned=alignClipBoundaries(c,contextStart,contextWords);
+  const adjusted={...c,...aligned};
+  const dur=adjusted.end-adjusted.start;
+  const words=contextWords.map(w=>({...w,start:Number(w.start)+contextStart-adjusted.start,end:Number(w.end)+contextStart-adjusted.start})).filter(w=>w.end>=0&&w.start<=dur).map(w=>({...w,start:Math.max(0,w.start),end:Math.min(dur,w.end)}));
+  const hookMatch=findQuotedWords(contextWords,c.hook_closing_words,c.hook_end-contextStart);
+  const hookEnd=hookMatch&&Math.abs(contextWords[hookMatch.endIndex].end+contextStart-c.hook_end)<4
+    ?contextWords[hookMatch.endIndex].end+contextStart:c.hook_end;
+  const introEnd=hookEnd-adjusted.start;
+  if(S.settings.qa&&(!Number.isFinite(introEnd)||introEnd<=.7||introEnd>=dur-.7)){
+    throw new Error('El clip '+(i+1)+' no tiene una frase contundente inicial completa validada. Volvé a analizar el material.');
+  }
+  const srcStart=Math.max(0,adjusted.start-4),srcEnd=Math.min(S.dur,adjusted.end+4),srcDur=srcEnd-srcStart;
+  progress(40+i*7,'Preparando fuente '+(i+1)+'/5…','Entrada B&N + audio telefónico; después transición suave a color.');
+  r=await ff.exec(['-ss',String(srcStart),'-t',String(srcDur),'-i','/input/'+S.file.name,'-map','0:v:0','-map','0:a?','-c','copy','-movflags','+faststart',source],10*60*1000);
+  if(r!==0){r=await ff.exec(['-ss',String(srcStart),'-t',String(srcDur),'-i','/input/'+S.file.name,'-vf','scale=1920:1920:force_original_aspect_ratio=decrease','-c:v','libx264','-preset','ultrafast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',source],20*60*1000);if(r!==0)throw new Error('No pude preparar el video del clip '+(i+1))}
+  const vb=await ff.read(source);await ff.del(source);
+  const baseName=`${S.jobId}-source-${String(i+1).padStart(2,'0')}`;
+  progress(44+i*7,'Subiendo fragmento '+(i+1)+'/5…','Lo divido en partes pequeñas para mantener la calidad sin superar el límite gratuito.');
+  const bytes=vb instanceof Uint8Array?vb:new Uint8Array(vb);const PART=24*1024*1024,source_parts=[];
+  for(let off=0,p=0;off<bytes.byteLength;off+=PART,p++){const chunk=bytes.slice(off,Math.min(bytes.byteLength,off+PART));const name=`${baseName}.part${String(p+1).padStart(3,'0')}`;const staged=await cloudUpload(name,new Blob([chunk],{type:'application/octet-stream'}),'application/octet-stream');source_parts.push(staged.url)}
+  return{...adjusted,source_parts,source_offset:adjusted.start-srcStart,intro_end_rel:introEnd,words,captions:S.settings.captions,qa:S.settings.qa,reframe:S.settings.reframe}
+}
 async function stageAll(clips){const out=[];for(let i=0;i<5;i++)out.push(await prepareOne(clips[i],i));return out}
 async function uploadManifest(clips){const enriched=[];for(let i=0;i<clips.length;i++){const name=`${S.jobId}-output-${String(i+1).padStart(2,'0')}.mp4`;const spec=await cloudUploadSpec(name,'output');enriched.push({...clips[i],output_path:spec.path,output_upload_url:spec.signed_url})}const manifest={version:2,job_id:S.jobId,created_at:new Date().toISOString(),category:S.category,clips:enriched};const up=await cloudUpload(`${S.jobId}-manifest.json`,new Blob([JSON.stringify(manifest)],{type:'application/octet-stream'}),'application/octet-stream','source');return up.url}
 async function poll(){const started=Date.now();while(Date.now()-started<45*60*1000){const a=await listAssets(),done=a.find(x=>x.name===S.jobId+'-done.json');progress(done?98:88,done?'Render terminado':'Editando en GitHub…',done?'Preparando los 5 videos para mostrar…':'GitHub está procesando los cinco clips.');if(done){const results=[];for(let i=0;i<5;i++){const path=`jobs/${S.jobId}/output/${S.jobId}-output-${String(i+1).padStart(2,'0')}.mp4`;const dl=await cloud('download-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});results.push({name:`${S.jobId}-output-${String(i+1).padStart(2,'0')}.mp4`,url:dl.url})}await showOutputs(results);progress(100,'Listo','Los cinco videos están terminados.');return}await new Promise(r=>setTimeout(r,8000))}throw new Error('El render tardó demasiado. Revisá GitHub Actions.')}

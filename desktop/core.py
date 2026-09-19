@@ -301,11 +301,12 @@ def _clip_schema():
                         "end": {"type": "number"},
                         "question_start": {"type": "number"},
                         "question_end": {"type": "number"},
+                        "hook_end": {"type": "number"},
                         "reason": {"type": "string"},
                     },
                     "required": [
                         "title", "start", "end",
-                        "question_start", "question_end", "reason",
+                        "question_start", "question_end", "hook_end", "reason",
                     ],
                     "additionalProperties": False,
                 },
@@ -497,9 +498,13 @@ Elegí EXACTAMENTE 5 fragmentos para reels a partir de esta transcripción con t
 Duración total: {total:.1f} segundos.
 Cada clip debe durar entre {min_dur} y {max_dur} segundos. {overlap}
 Priorizá respuestas completas, frases memorables, datos, consecuencias, explicaciones claras, emoción, sorpresa o humor.
-Evitá saludos, relleno, contexto incompleto y cortes a mitad de frase.
-Si hay una pregunta breve antes de una buena respuesta, incluí la pregunta y marcá question_start y question_end; si no, ambos = -1.
-El end debe quedar entre 1.3 y 2.3 segundos después de la última palabra de la idea elegida.
+Cada clip debe ser una mini historia autosuficiente: planteo o contexto suficiente, desarrollo y remate/cierre.
+No empieces a mitad de palabra, oración o razonamiento. Evitá comienzos huérfanos como "sí", "no", "también", "porque", "entonces", "pero", "eso" o "esto" cuando no se entienda el referente.
+No termines en conectores o promesas de continuación como "y", "pero", "porque", "entonces", "además", "yo creo que" o "lo que pasa es".
+El corte debe quedar después de la última palabra que cierra la idea y antes de que comience la oración o el tema siguiente.
+Evitá saludos, relleno, contexto incompleto y cortes a mitad de frase. Preferí una idea completa más corta antes que rellenarla o truncarla para alcanzar la duración máxima.
+Empezá con una frase contundente, completa y autosuficiente del protagonista, nunca con la pregunta del entrevistador. Esa frase inicial lleva blanco y negro y audio telefónico. Después continúa el desarrollo en color y audio normal. Devolvé hook_end con el segundo absoluto donde termina esa frase completa; debe quedar desarrollo después. No inventes una duración fija. question_start y question_end deben ser -1. Si necesitás una pregunta para entender la respuesta, elegí otro momento autosuficiente.
+Dejá solamente entre 0.25 y 0.65 segundos de aire después de la última palabra. No incluyas las primeras palabras de la idea siguiente.
 Categoría: {category}. Modo: {mode}. Pedido específico: {request}.
 {political}
 Devolvé solamente la estructura solicitada, con exactamente 5 clips.
@@ -571,13 +576,6 @@ TRANSCRIPCIÓN:
     for i, item in enumerate(raw):
         st = max(0.0, min(float(item.get("start", 0)), max(0.0, total - 0.2)))
         en = max(st + 0.5, min(float(item.get("end", st + min_dur)), total))
-        if en - st < min_dur:
-            en = min(total, st + min_dur)
-            st = max(0.0, en - min_dur)
-        if en - st > max_dur + 2.5:
-            en = min(total, st + max_dur + 2.0)
-        en = min(total, en + 1.4)
-
         qs = float(item.get("question_start", -1) or -1)
         qe = float(item.get("question_end", -1) or -1)
         if not (st <= qs < qe < en):
@@ -589,6 +587,7 @@ TRANSCRIPCIÓN:
             "end": en,
             "question_start": qs,
             "question_end": qe,
+            "hook_end": item.get("hook_end"),
             "reason": str(item.get("reason") or ""),
         })
     return clips
@@ -648,25 +647,34 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     out.write_text(header + "\n".join(lines), encoding="utf-8")
 
 
+def _intro_end(clip, words):
+    dur = clip["end"] - clip["start"]
+    declared = float(clip.get("hook_end") or 0) - clip["start"]
+    if 0.7 < declared < dur - 0.7:
+        return declared
+    raise RuntimeError("No hay un gancho contundente inicial validado. Volvé a analizar la nota.")
+
+
 def render_clip(video, clip, words, out, status, idx):
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     dur = clip["end"] - clip["start"]
     ass = out.with_suffix(".ass")
     make_ass(words, clip, ass)
-    q = clip["question_end"] - clip["start"] if clip["question_end"] > clip["start"] else 0
+    q = _intro_end(clip, words)
     qa = q > 0.7 and q < dur - 0.7
     base = "setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     f = []
     if qa:
+        transition = max(0.18, min(0.38, q - 0.25, dur - q - 0.25))
         f += [
             f"[0:v]{base},split=2[vq0][vr0]",
-            f"[vq0]trim=start=0:end={q:.3f},setpts=PTS-STARTPTS,hue=s=0[vq]",
-            f"[vr0]trim=start={q:.3f},setpts=PTS-STARTPTS[vr]",
-            "[vq][vr]concat=n=2:v=1:a=0[vbase]",
+            f"[vq0]trim=start=0:end={q:.3f},setpts=PTS-STARTPTS,hue=s=0,eq=contrast=1.06:brightness=-0.025[vq]",
+            f"[vr0]trim=start={q-transition:.3f},setpts=PTS-STARTPTS[vr]",
+            f"[vq][vr]xfade=transition=fade:duration={transition:.3f}:offset={q-transition:.3f}[vbase]",
             "[0:a]asetpts=PTS-STARTPTS,asplit=2[aq0][ar0]",
             f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,volume=1.05[aq]",
-            f"[ar0]atrim=start={q:.3f},asetpts=PTS-STARTPTS[ar]",
-            "[aq][ar]concat=n=2:v=0:a=1[abase]",
+            f"[ar0]atrim=start={q-transition:.3f},asetpts=PTS-STARTPTS[ar]",
+            f"[aq][ar]acrossfade=d={transition:.3f}:c1=tri:c2=tri[abase]",
         ]
     else:
         f += [f"[0:v]{base}[vbase]", "[0:a]asetpts=PTS-STARTPTS[abase]"]

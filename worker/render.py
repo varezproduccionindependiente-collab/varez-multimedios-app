@@ -100,22 +100,23 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 def run_ffmpeg(src, out, ass, clip):
     source_offset=max(0,float(clip.get("source_offset",0)))
     duration=max(1,float(clip["end"])-float(clip["start"]))
-    q=float(clip.get("question_end_rel") or 0)
+    q=float(clip.get("intro_end_rel") or clip.get("question_end_rel") or 0)
     captions=bool(clip.get("captions",True))
     qa=bool(clip.get("qa",True)) and q>.7 and q<duration-.7
 
     base="setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     fc=[]
     if qa:
+        transition=max(.18,min(.38,q-.25,duration-q-.25))
         fc += [
             f"[0:v]{base},split=2[vq0][vr0]",
-            f"[vq0]trim=start=0:end={q:.3f},setpts=PTS-STARTPTS,hue=s=0[vq]",
-            f"[vr0]trim=start={q:.3f},setpts=PTS-STARTPTS[vr]",
-            "[vq][vr]concat=n=2:v=1:a=0[vbase]",
+            f"[vq0]trim=start=0:end={q:.3f},setpts=PTS-STARTPTS,hue=s=0,eq=contrast=1.06:brightness=-0.025[vq]",
+            f"[vr0]trim=start={q-transition:.3f},setpts=PTS-STARTPTS[vr]",
+            f"[vq][vr]xfade=transition=fade:duration={transition:.3f}:offset={q-transition:.3f}[vbase]",
             "[0:a]asetpts=PTS-STARTPTS,asplit=2[aq0][ar0]",
             f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,volume=1.05[aq]",
-            f"[ar0]atrim=start={q:.3f},asetpts=PTS-STARTPTS[ar]",
-            "[aq][ar]concat=n=2:v=0:a=1[abase]",
+            f"[ar0]atrim=start={q-transition:.3f},asetpts=PTS-STARTPTS[ar]",
+            f"[aq][ar]acrossfade=d={transition:.3f}:c1=tri:c2=tri[abase]",
         ]
     else:
         fc += [f"[0:v]{base}[vbase]","[0:a]asetpts=PTS-STARTPTS[abase]"]
