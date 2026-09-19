@@ -1,9 +1,6 @@
 name: Recover Last Varez Render
 
 on:
-  push:
-    paths:
-      - '.github/workflows/recover-render.yml'
   workflow_dispatch:
     inputs:
       release_id:
