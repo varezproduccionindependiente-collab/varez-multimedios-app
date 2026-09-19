@@ -13,7 +13,7 @@ import av
 import imageio_ffmpeg
 import psutil
 import requests
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, download_model
 
 OLLAMA = "http://127.0.0.1:11434"
 
@@ -63,60 +63,147 @@ def duration_seconds(path: Path):
     return 0.0
 
 
-def _whisper_repo_folder(model_name: str, whisper_root: Path):
-    safe = model_name.replace("/", "--")
-    candidates = [
-        whisper_root / ("models--Systran--faster-whisper-" + model_name),
-        whisper_root / ("models--" + safe),
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return candidates[0]
+def _whisper_direct_dir(model_name: str, whisper_root: Path):
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", model_name)
+    return whisper_root / "ready" / safe
 
 
-def _load_whisper_model(model_name: str, device: str, compute: str, whisper_root: Path, status):
-    last_error = None
-    for attempt in range(3):
+def _whisper_model_complete(model_dir: Path):
+    model_bin = model_dir / "model.bin"
+    config_file = model_dir / "config.json"
+    tokenizer = model_dir / "tokenizer.json"
+    try:
+        return (
+            model_bin.is_file()
+            and model_bin.stat().st_size > 50 * 1024 * 1024
+            and config_file.is_file()
+            and tokenizer.is_file()
+        )
+    except Exception:
+        return False
+
+
+def _remove_legacy_whisper_cache(model_name: str, whisper_root: Path):
+    # Older Varez versions let Hugging Face create snapshot/symlink caches.
+    # They are the source of the missing model.bin issue on this PC.
+    for p in whisper_root.glob("models--*"):
         try:
-            return WhisperModel(
+            if model_name.lower() in p.name.lower():
+                shutil.rmtree(p, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def ensure_whisper_model(model_name: str, whisper_root: Path, status=None):
+    whisper_root.mkdir(parents=True, exist_ok=True)
+    target = _whisper_direct_dir(model_name, whisper_root)
+    cache_dir = whisper_root / "_download_cache"
+
+    if _whisper_model_complete(target):
+        if status:
+            status(100, "Whisper listo", model_name + " verificado en D:.")
+        return target
+
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            if attempt > 1 and cache_dir.exists():
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            target.mkdir(parents=True, exist_ok=True)
+
+            if status:
+                status(
+                    10,
+                    "Descargando Whisper…",
+                    f"{model_name} · descarga limpia {attempt}/3 directamente a D:.",
+                )
+
+            # Important: output_dir makes the actual CT2 files live directly in
+            # our own folder. Varez no longer loads from HF snapshot paths.
+            downloaded = Path(download_model(
                 model_name,
-                device=device,
-                compute_type=compute,
-                download_root=str(whisper_root),
-            )
+                output_dir=str(target),
+                cache_dir=str(cache_dir),
+                local_files_only=False,
+            ))
+
+            if downloaded != target and downloaded.exists() and not _whisper_model_complete(target):
+                for src in downloaded.iterdir():
+                    dst = target / src.name
+                    if src.is_file():
+                        shutil.copy2(src, dst)
+
+            if not _whisper_model_complete(target):
+                raise RuntimeError(
+                    "La descarga terminó pero faltan archivos del modelo "
+                    "(model.bin/config.json/tokenizer.json)."
+                )
+
+            _remove_legacy_whisper_cache(model_name, whisper_root)
+
+            if status:
+                status(92, "Verificando Whisper…", "Archivos completos. Probando que el modelo abra correctamente.")
+            return target
+
         except Exception as e:
             last_error = e
-            msg = str(e).lower()
-            broken = _whisper_repo_folder(model_name, whisper_root)
-
-            # Missing model.bin means a partial Hugging Face snapshot. Network
-            # interruptions can also leave a partial cache, so on retries we
-            # clean only this model and start again.
-            should_clean = (
-                "model.bin" in msg
-                or "unable to open file" in msg
-                or "snapshot" in msg
-                or "incomplete" in msg
-            )
-            if should_clean and broken.exists():
-                shutil.rmtree(broken, ignore_errors=True)
-
-            if attempt < 2:
+            shutil.rmtree(target, ignore_errors=True)
+            if status and attempt < 3:
                 status(
-                    8,
-                    "Reparando Whisper…",
-                    f"Intento {attempt + 2}/3. Reintentando la descarga limpia del modelo.",
+                    15,
+                    "Reintentando Whisper…",
+                    f"Intento {attempt}/3 falló. Limpio la descarga y vuelvo a intentar.",
                 )
-                time.sleep(1.5)
-                continue
-            raise last_error
-    raise last_error
+            time.sleep(1.5)
+
+    raise RuntimeError("No pude preparar Whisper después de 3 intentos: " + str(last_error))
+
+
+def prepare_whisper_model(config, status=None):
+    rt = detect_runtime(config)
+    model_name = rt["whisper_model"]
+    device = "cuda" if rt["cuda"] else "cpu"
+    compute = "float16" if device == "cuda" else "int8"
+    model_root = Path(config.get("models_root") or (Path.home() / ".cache" / "varez-models"))
+    whisper_root = model_root / "whisper"
+
+    model_dir = ensure_whisper_model(model_name, whisper_root, status)
+
+    try:
+        probe = WhisperModel(str(model_dir), device=device, compute_type=compute)
+        del probe
+    except Exception:
+        # If CUDA was detected but loading still fails, prepare and verify CPU.
+        if device == "cuda":
+            model_name = config["whisper_cpu_model"]
+            device = "cpu"
+            compute = "int8"
+            model_dir = ensure_whisper_model(model_name, whisper_root, status)
+            probe = WhisperModel(str(model_dir), device=device, compute_type=compute)
+            del probe
+        else:
+            raise
+
+    if status:
+        status(100, "Whisper listo", model_name + " · " + device.upper() + " · verificado.")
+    return {
+        "model_name": model_name,
+        "model_dir": str(model_dir),
+        "device": device,
+        "compute": compute,
+    }
 
 
 def _run_whisper(path: Path, model_name: str, device: str, compute: str, whisper_root: Path, status):
     status(7, "Cargando Whisper…", model_name + " · " + device.upper())
-    model = _load_whisper_model(model_name, device, compute, whisper_root, status)
+    model_dir = ensure_whisper_model(
+        model_name,
+        whisper_root,
+        lambda p, t, d: status(6 + int(p * 0.04), t, d),
+    )
+    model = WhisperModel(str(model_dir), device=device, compute_type=compute)
     status(
         12,
         "Transcribiendo la nota completa…",
