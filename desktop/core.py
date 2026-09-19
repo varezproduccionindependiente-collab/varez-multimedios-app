@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -44,14 +45,53 @@ def duration_seconds(path: Path):
     return 0.0
 
 
+def _whisper_repo_folder(model_name: str, whisper_root: Path):
+    safe = model_name.replace("/", "--")
+    candidates = [
+        whisper_root / ("models--Systran--faster-whisper-" + model_name),
+        whisper_root / ("models--" + safe),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+def _load_whisper_model(model_name: str, device: str, compute: str, whisper_root: Path, status):
+    try:
+        return WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute,
+            download_root=str(whisper_root),
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        if "model.bin" not in msg and "unable to open file" not in msg:
+            raise
+
+        # A previous interrupted download can leave a Hugging Face snapshot
+        # without model.bin. Remove only that model cache and retry once.
+        broken = _whisper_repo_folder(model_name, whisper_root)
+        status(
+            8,
+            "Reparando Whisper…",
+            "La descarga anterior quedó incompleta. Varez la elimina y vuelve a bajarla.",
+        )
+        if broken.exists():
+            shutil.rmtree(broken, ignore_errors=True)
+
+        return WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute,
+            download_root=str(whisper_root),
+        )
+
+
 def _run_whisper(path: Path, model_name: str, device: str, compute: str, whisper_root: Path, status):
     status(7, "Cargando Whisper…", model_name + " · " + device.upper())
-    model = WhisperModel(
-        model_name,
-        device=device,
-        compute_type=compute,
-        download_root=str(whisper_root),
-    )
+    model = _load_whisper_model(model_name, device, compute, whisper_root, status)
     status(
         12,
         "Transcribiendo la nota completa…",
