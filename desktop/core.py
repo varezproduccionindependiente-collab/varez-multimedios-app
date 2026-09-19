@@ -50,7 +50,10 @@ def transcribe(path: Path, config, status):
     compute = "float16" if device == "cuda" else "int8"
     model_name = rt["whisper_model"]
     status(7, "Cargando Whisper…", model_name + " · " + device.upper())
-    model = WhisperModel(model_name, device=device, compute_type=compute)
+    model_root = Path(config.get("models_root") or (Path.home() / ".cache" / "varez-models"))
+    whisper_root = model_root / "whisper"
+    whisper_root.mkdir(parents=True, exist_ok=True)
+    model = WhisperModel(model_name, device=device, compute_type=compute, download_root=str(whisper_root))
     status(12, "Transcribiendo la nota completa…", "Whisper local con timestamps palabra por palabra.")
     segs, info = model.transcribe(
         str(path), language="es",
