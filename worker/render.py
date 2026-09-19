@@ -133,21 +133,27 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--release-id",required=True,type=int)
     ap.add_argument("--job-id",required=True)
+    ap.add_argument("--manifest-url",required=True)
     a=ap.parse_args()
     rid=a.release_id; jid=a.job_id
-    assets=list_assets(rid)
-    amap={x["name"]:x for x in assets}
-    manifest_name=f"{jid}-manifest.json"
-    if manifest_name not in amap: raise RuntimeError("Manifest no encontrado")
     with tempfile.TemporaryDirectory() as td:
         td=Path(td)
-        mpath=td/"manifest.json"; download_asset(amap[manifest_name],mpath)
+        mpath=td/"manifest.json"
+        r=requests.get(a.manifest_url,timeout=600)
+        r.raise_for_status()
+        mpath.write_bytes(r.content)
         manifest=json.loads(mpath.read_text("utf-8"))
         made=[]
         for i,clip in enumerate(manifest["clips"],1):
             src_name=f"{jid}-source-{i:02d}.mp4"
-            if src_name not in amap: raise RuntimeError(f"Falta {src_name}")
-            src=td/src_name; download_asset(amap[src_name],src)
+            src=td/src_name
+            source_url=clip.get("source_url")
+            if not source_url: raise RuntimeError(f"Falta source_url para clip {i}")
+            rr=requests.get(source_url,timeout=1200,stream=True)
+            rr.raise_for_status()
+            with open(src,"wb") as f:
+                for chunk in rr.iter_content(1024*1024):
+                    if chunk: f.write(chunk)
             ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
             out=td/f"{jid}-output-{i:02d}.mp4"
             run_ffmpeg(src,out,ass,clip)
@@ -158,11 +164,6 @@ def main():
         done=td/f"{jid}-done.json"
         done.write_text(json.dumps({"ok":True,"job_id":jid,"outputs":made}),encoding="utf-8")
         upload_asset(rid,done,done.name,"application/json")
-        # remove temporary source assets and manifest after success
-        refreshed=list_assets(rid)
-        for x in refreshed:
-            if x["name"]==manifest_name or x["name"].startswith(f"{jid}-source-"):
-                delete_asset(x["id"])
 
 if __name__=="__main__":
     try:
