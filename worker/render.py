@@ -113,7 +113,7 @@ def run_ffmpeg(src, out, ass, clip):
             f"[vr0]trim=start={q:.3f},setpts=PTS-STARTPTS[vr]",
             "[vq][vr]concat=n=2:v=1:a=0[vbase]",
             "[0:a]asetpts=PTS-STARTPTS,asplit=2[aq0][ar0]",
-            f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=320,lowpass=f=3300,volume=1.08[aq]",
+            f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,volume=1.05[aq]",
             f"[ar0]atrim=start={q:.3f},asetpts=PTS-STARTPTS[ar]",
             "[aq][ar]concat=n=2:v=0:a=1[abase]",
         ]
