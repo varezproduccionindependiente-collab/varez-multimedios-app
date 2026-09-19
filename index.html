@@ -33,7 +33,7 @@
           <div class="check"><div><b>Reencuadre vertical</b><p>9:16 con recorte central. El seguimiento de rostro viene en la próxima versión.</p></div><div class="toggle on" data-setting="reframe"></div></div>
           <div class="check"><div><b>Eliminar silencios largos</b><p>La selección ya evita pausas innecesarias; el corte interno exacto está en beta.</p></div><div class="toggle beta" data-setting="silences"></div></div>
         </div></div>
-        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. En iPhone activa automáticamente un modo estable: Whisper Base, render secuencial y liberación de memoria entre etapas. En PC usa el modelo de mayor precisión.</div>
+        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. En iPhone activa automáticamente un modo compatible: Whisper Tiny optimizado, fragmentos cortos, render secuencial y liberación de memoria entre etapas. En PC usa el modelo de mayor precisión.</div>
       </div>
     </main>
 
@@ -124,9 +124,10 @@
     if(state.transcriber)return state.transcriber;
     if(state.modelLoading)return state.modelLoading;
     state.modelLoading=(async()=>{
-      const model=MOBILE?'Xenova/whisper-base':'Xenova/whisper-small';
-      setProgress(8,MOBILE?'Cargando Whisper Base…':'Cargando Whisper Small…',MOBILE?'Modo iPhone estable: mejor precisión sin saturar la memoria.':'Modelo local de mayor precisión.');
-      const mod=await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
+      const model=MOBILE?'Xenova/whisper-tiny':'Xenova/whisper-small';
+      setProgress(8,MOBILE?'Cargando Whisper para iPhone…':'Cargando Whisper Small…',MOBILE?'Versión compatible con iOS, forzada a español y optimizada para no reiniciar Safari.':'Modelo local de mayor precisión.');
+      const lib=MOBILE?'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.15.1/+esm':'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm';
+      const mod=await import(lib);
       mod.env.allowLocalModels=false;
       mod.env.useBrowserCache=true;
       let tr;
@@ -135,8 +136,8 @@
           if(p&&p.status==='progress'&&Number.isFinite(p.progress)) setProgress(8+Math.min(14,p.progress*.14),MOBILE?'Descargando Whisper Base…':'Descargando Whisper Small…',`${Math.round(p.progress)}% del modelo`);
         }});
       }catch(e){
-        setProgress(10,'Usando Whisper Base…','Cambio automático a una versión más liviana.');
-        tr=await mod.pipeline('automatic-speech-recognition','Xenova/whisper-base',{quantized:true});
+        setProgress(10,'Usando Whisper Tiny…','Fallback compatible con iPhone.');
+        tr=await mod.pipeline('automatic-speech-recognition','Xenova/whisper-tiny',{quantized:true});
       }
       state.transcriber=tr;
       return tr;
@@ -178,7 +179,7 @@
   async function transcribeAll(){
     const ff=await getFF();
     const tr=await getTranscriber();
-    const chunk=MOBILE?45:60,total=Math.ceil(state.duration/chunk);let allText=[],words=[];
+    const chunk=MOBILE?30:60,total=Math.ceil(state.duration/chunk);let allText=[],words=[];
     for(let i=0;i<total;i++){
       const start=i*chunk,len=Math.min(chunk,state.duration-start),out=`/audio_${i}.raw`;
       setProgress(20+(i/total)*42,`Preparando audio ${i+1}/${total}`,`${fmt(start)} → ${fmt(start+len)}`);
@@ -186,7 +187,7 @@
       if(ret!==0)throw new Error('No se pudo extraer el audio del video.');
       const bytes=await ff.read(out);await ff.del(out);const audio=pcm16ToFloat32(bytes);
       setProgress(24+(i/total)*42,`Transcribiendo en español ${i+1}/${total}`,'Whisper local · modo transcripción, nunca traducción.');
-      const d=await tr(audio,{language:'spanish',task:'transcribe',return_timestamps:'word',chunk_length_s:30,stride_length_s:5,num_beams:MOBILE?1:3});
+      const d=await tr(audio,{language:'spanish',task:'transcribe',return_timestamps:'word',chunk_length_s:MOBILE?20:30,stride_length_s:MOBILE?4:5,num_beams:MOBILE?2:3});
       allText.push(String(d.text||'').trim());
       for(const x of (d.chunks||[])){
         const ts=x.timestamp||[0,0],raw=String(x.text||'').trim();if(!raw)continue;
@@ -245,6 +246,7 @@
     return byCat[state.category]||common;
   }
   async function getEmbedder(){
+    if(MOBILE)return null;
     if(state.embedder)return state.embedder;
     if(state.embedLoading)return state.embedLoading;
     state.embedLoading=(async()=>{
@@ -288,12 +290,17 @@
       const filler=(text.match(/\b(este|digamos|o sea|bueno|nada|viste|eh|em|tipo)\b/gi)||[]).length;
       const numbers=(text.match(/\b\d+[\d.,%]*\b/g)||[]).length;
       let heuristic=0;
-      heuristic+=Math.max(0,2-Math.abs((end-start)-46)/18);
-      heuristic+=qe?1.7:0;
-      heuristic+=/[.!?…]$/.test(text.trim())?.8:0;
-      heuristic+=Math.min(1.2,numbers*.25);
-      heuristic-=Math.min(1.4,filler*.12);
-      if(/^y\b|^pero\b|^porque\b|^entonces\b/i.test(norm(text)))heuristic-=.45;
+      const nt=norm(text);
+      const strong=(nt.match(/\b(importante|problema|solucion|solución|impacto|significa|objetivo|decision|decisión|necesitamos|logramos|conseguimos|primera vez|nunca|siempre|hoy|ahora|verdad|claramente|principal|clave|resultado|consecuencia|millones|porcentaje|responsabilidad|propuesta|medida|cambio)\b/g)||[]).length;
+      const weakStart=/^(y|pero|porque|entonces|bueno|este|digamos|o sea)\b/i.test(nt);
+      heuristic+=Math.max(0,2.4-Math.abs((end-start)-46)/16);
+      heuristic+=qe?2.4:0;
+      heuristic+=/[.!?…]$/.test(text.trim())?1.0:0;
+      heuristic+=Math.min(1.4,numbers*.28);
+      heuristic+=Math.min(2.0,strong*.35);
+      heuristic-=Math.min(1.6,filler*.13);
+      if(weakStart)heuristic-=.8;
+      if(text.split(/\s+/).length>=55)heuristic+=.5;
       candidates.push({start,end,text,question_end:qe,heuristic});
     }
     if(!candidates.length)return[];
@@ -311,7 +318,10 @@
         semantic=specific?(sims[0]||0)*12:((sims[0]||0)*7+(sims[1]||0)*2);
       }else{
         const set=new Set(terms(c.text));
-        const refs=terms(prompts.join(' '));semantic=refs.filter(x=>set.has(x)).length*.18;
+        const refs=terms(prompts.join(' '));
+        const hits=refs.filter(x=>set.has(x)).length;
+        const reqHits=specific?terms(request).filter(x=>set.has(x)).length:0;
+        semantic=hits*.22+reqHits*1.8;
       }
       c.score=c.heuristic+semantic;
     });
@@ -455,7 +465,7 @@
   $('#settingsBtn').onclick=()=>$('#settingsModal').classList.add('show');$('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('show');
   $('#historyBtn').onclick=()=>{const b=$('#historyBox');b.style.display=b.style.display==='none'?'block':'none';if(b.style.display==='block')loadHistory()};
 
-  if(MOBILE){$('#quality').value='720';$('#log').textContent='Modo iPhone estable activado.'} ensureLogin();if(pin())loadHistory();
+  if(MOBILE){$('#quality').value='720';$('#log').textContent='Modo iPhone compatible activado.'} ensureLogin();if(pin())loadHistory();
 })();
 </script>
 </body>
