@@ -3,8 +3,8 @@ name: Render Varez Multimedios
 on:
   workflow_dispatch:
     inputs:
-      manifest_url:
-        description: "Signed manifest URL"
+      release_id:
+        description: "Draft release id used as temporary storage"
         required: true
         type: string
       job_id:
@@ -13,22 +13,26 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install FFmpeg
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade requests
       - name: Render five clips
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python worker/render.py --manifest-url "${{ inputs.manifest_url }}" --job-id "${{ inputs.job_id }}"
+          python worker/render.py --release-id "${{ inputs.release_id }}" --job-id "${{ inputs.job_id }}"
