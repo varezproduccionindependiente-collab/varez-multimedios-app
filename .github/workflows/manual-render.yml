@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
-          pip install gdown
+          pip install gdown faster-whisper
       - name: Render Varez clip
         run: python worker/manual_render.py
       - name: Publish clip
@@ -29,7 +29,7 @@ jobs:
           git config user.name "Varez Worker"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase origin main
-          git add manual/output/Nati_Clip_01.mp4
-          git commit -m "Render Nati Varez clip 01" || exit 0
+          git add manual/output/Nati_Clip_01_v2.mp4
+          git commit -m "Render Nati Varez clip 01 v2" || exit 0
           git pull --rebase origin main
           git push
