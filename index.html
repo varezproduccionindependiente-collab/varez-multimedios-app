@@ -33,7 +33,7 @@
           <div class="check"><div><b>Reencuadre vertical</b><p>9:16 con recorte central. El seguimiento de rostro viene en la próxima versión.</p></div><div class="toggle on" data-setting="reframe"></div></div>
           <div class="check"><div><b>Eliminar silencios largos</b><p>La selección ya evita pausas innecesarias; el corte interno exacto está en beta.</p></div><div class="toggle beta" data-setting="silences"></div></div>
         </div></div>
-        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. La primera vez descarga modelos gratuitos de transcripción y criterio editorial al navegador. Para entrevistas largas conviene usar una PC o Mac; en iPhone puede ser más lento.</div>
+        <div class="notice"><b>Modo gratis:</b> no usa créditos ni API paga. En iPhone activa automáticamente un modo estable: Whisper Base, render secuencial y liberación de memoria entre etapas. En PC usa el modelo de mayor precisión.</div>
       </div>
     </main>
 
@@ -42,7 +42,7 @@
       <div class="cardBody">
         <div class="previewWrap"><div class="preview"><video id="previewVideo" playsinline controls style="display:none"></video><div class="fake" id="fakePreview">Cargá un video para previsualizar</div><div class="captionDemo" id="captionDemo">HOY ESTOY <span class="hot">TRANSITANDO</span></div></div></div>
         <div class="specs"><div class="spec"><small>Clips</small><b>5 clips listos</b></div><div class="spec"><small>Duración</small><b>30–60 s ideal</b></div><div class="spec"><small>Formato</small><b>9:16</b></div><div class="spec"><small>Título arriba</small><b>No</b></div></div>
-        <div class="field"><div class="label">Calidad de exportación</div><select id="quality"><option value="720">720×1280 · más rápido</option><option value="1080">1080×1920 · final</option></select></div>
+        <div class="field"><div class="label">Calidad de exportación</div><select id="quality"><option value="720">720×1280 · recomendado en iPhone</option><option value="1080">1080×1920 · recomendado en PC/Mac</option></select></div>
         <button class="primary big" id="analyzeBtn">Analizar y crear 5 clips</button>
         <div class="progressBox" id="progressBox"><div class="progressTop"><span id="progressLabel">Preparando…</span><b id="progressPct">0%</b></div><div class="bar"><i id="bar"></i></div><div class="log" id="log"></div></div>
         <div class="history" id="historyBox" style="display:none"><h3>Últimos análisis</h3><div class="historyList" id="historyList"></div></div>
@@ -62,7 +62,8 @@
 (() => {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
-  const state = { file:null, duration:0, category:'Entrevista', mode:'auto', settings:{captions:true,qa:true,reframe:true,silences:false}, transcript:null, clips:[], ff:null, mounted:false, previewTimer:null, transcriber:null, modelLoading:null, embedder:null, embedLoading:null };
+  const MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const state = { file:null, duration:0, category:'Entrevista', mode:'auto', settings:{captions:true,qa:true,reframe:true,silences:false}, transcript:null, clips:[], ff:null, mounted:false, previewTimer:null, transcriber:null, modelLoading:null, embedder:null, embedLoading:null, mobile:MOBILE, fontReady:false };
   const enc = new TextEncoder();
 
   function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -123,23 +124,42 @@
     if(state.transcriber)return state.transcriber;
     if(state.modelLoading)return state.modelLoading;
     state.modelLoading=(async()=>{
-      setProgress(8,'Cargando Whisper Small…','Modelo gratuito local, bastante más preciso que el anterior.');
+      const model=MOBILE?'Xenova/whisper-base':'Xenova/whisper-small';
+      setProgress(8,MOBILE?'Cargando Whisper Base…':'Cargando Whisper Small…',MOBILE?'Modo iPhone estable: mejor precisión sin saturar la memoria.':'Modelo local de mayor precisión.');
       const mod=await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
       mod.env.allowLocalModels=false;
       mod.env.useBrowserCache=true;
       let tr;
       try{
-        tr=await mod.pipeline('automatic-speech-recognition','Xenova/whisper-small',{quantized:true,progress_callback:(p)=>{
-          if(p&&p.status==='progress'&&Number.isFinite(p.progress)) setProgress(8+Math.min(14,p.progress*.14),'Descargando Whisper Small…',`${Math.round(p.progress)}% del modelo`);
+        tr=await mod.pipeline('automatic-speech-recognition',model,{quantized:true,progress_callback:(p)=>{
+          if(p&&p.status==='progress'&&Number.isFinite(p.progress)) setProgress(8+Math.min(14,p.progress*.14),MOBILE?'Descargando Whisper Base…':'Descargando Whisper Small…',`${Math.round(p.progress)}% del modelo`);
         }});
       }catch(e){
-        setProgress(10,'Usando Whisper Base…','El modelo Small no pudo cargarse en este dispositivo; uso el siguiente más preciso.');
+        setProgress(10,'Usando Whisper Base…','Cambio automático a una versión más liviana.');
         tr=await mod.pipeline('automatic-speech-recognition','Xenova/whisper-base',{quantized:true});
       }
       state.transcriber=tr;
       return tr;
     })();
     try{return await state.modelLoading}finally{state.modelLoading=null}
+  }
+
+  async function releaseTranscriber(){
+    try{if(state.transcriber&&typeof state.transcriber.dispose==='function')await state.transcriber.dispose()}catch{}
+    state.transcriber=null;state.modelLoading=null;
+    await new Promise(r=>setTimeout(r,80));
+  }
+
+  async function releaseEmbedder(){
+    try{if(state.embedder&&typeof state.embedder.dispose==='function')await state.embedder.dispose()}catch{}
+    state.embedder=null;state.embedLoading=null;
+    await new Promise(r=>setTimeout(r,80));
+  }
+
+  async function releaseFF(){
+    try{if(state.ff?.worker)state.ff.worker.terminate()}catch{}
+    state.ff=null;state.mounted=false;state.fontReady=false;
+    await new Promise(r=>setTimeout(r,80));
   }
 
   function wordsToSegments(words){
@@ -158,7 +178,7 @@
   async function transcribeAll(){
     const ff=await getFF();
     const tr=await getTranscriber();
-    const chunk=60,total=Math.ceil(state.duration/chunk);let allText=[],words=[];
+    const chunk=MOBILE?45:60,total=Math.ceil(state.duration/chunk);let allText=[],words=[];
     for(let i=0;i<total;i++){
       const start=i*chunk,len=Math.min(chunk,state.duration-start),out=`/audio_${i}.raw`;
       setProgress(20+(i/total)*42,`Preparando audio ${i+1}/${total}`,`${fmt(start)} → ${fmt(start+len)}`);
@@ -166,7 +186,7 @@
       if(ret!==0)throw new Error('No se pudo extraer el audio del video.');
       const bytes=await ff.read(out);await ff.del(out);const audio=pcm16ToFloat32(bytes);
       setProgress(24+(i/total)*42,`Transcribiendo en español ${i+1}/${total}`,'Whisper local · modo transcripción, nunca traducción.');
-      const d=await tr(audio,{language:'spanish',task:'transcribe',return_timestamps:'word',chunk_length_s:30,stride_length_s:5,num_beams:/iPhone|iPad|Android/i.test(navigator.userAgent)?1:3});
+      const d=await tr(audio,{language:'spanish',task:'transcribe',return_timestamps:'word',chunk_length_s:30,stride_length_s:5,num_beams:MOBILE?1:3});
       allText.push(String(d.text||'').trim());
       for(const x of (d.chunks||[])){
         const ts=x.timestamp||[0,0],raw=String(x.text||'').trim();if(!raw)continue;
@@ -321,9 +341,12 @@
     try{
       setProgress(3,'Preparando análisis…','Sin API paga.');
       state.transcript=await transcribeAll();
+      await releaseTranscriber();
       setProgress(70,'Eligiendo los 5 mejores momentos…','Criterio semántico + estructura pregunta/respuesta.');
       state.clips=await localSelectClips();
+      await releaseEmbedder();
       if(!state.clips.length)throw new Error('No pude encontrar fragmentos completos en esta nota.');
+      if(MOBILE&&$('#quality').value==='1080')$('#quality').value='720';
       renderResults();
       await renderAllClips();
       const hist=JSON.parse(localStorage.getItem('varez_multimedios_history')||'[]');
@@ -348,7 +371,8 @@
     for(let i=0;i<state.clips.length;i++){
       setProgress(80+((i/state.clips.length)*19),`Editando clip ${i+1} de ${state.clips.length}`,'Aplicando vertical, subtítulos y pregunta en B&N + audio telefónico cuando corresponde.');
       await renderClip(i,null);
-      await new Promise(r=>setTimeout(r,30));
+      if(MOBILE)await releaseFF();
+      await new Promise(r=>setTimeout(r,MOBILE?180:30));
     }
   }
 
@@ -431,7 +455,7 @@
   $('#settingsBtn').onclick=()=>$('#settingsModal').classList.add('show');$('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('show');
   $('#historyBtn').onclick=()=>{const b=$('#historyBox');b.style.display=b.style.display==='none'?'block':'none';if(b.style.display==='block')loadHistory()};
 
-  ensureLogin();if(pin())loadHistory();
+  if(MOBILE){$('#quality').value='720';$('#log').textContent='Modo iPhone estable activado.'} ensureLogin();if(pin())loadHistory();
 })();
 </script>
 </body>
