@@ -11,6 +11,10 @@ on:
         description: "Varez job id"
         required: true
         type: string
+      manifest_url:
+        description: "Signed Supabase manifest URL"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -35,4 +39,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python worker/render.py --release-id "${{ inputs.release_id }}" --job-id "${{ inputs.job_id }}"
+          python worker/render.py --release-id "${{ inputs.release_id }}" --job-id "${{ inputs.job_id }}" --manifest-url "${{ inputs.manifest_url }}"
