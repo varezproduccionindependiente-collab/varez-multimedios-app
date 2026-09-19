@@ -29,7 +29,7 @@ jobs:
           git config user.name "Varez Worker"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase origin main
-          git add manual/output/Nati_Clip_01_v2.mp4
-          git commit -m "Render Nati Varez clip 01 v2" || exit 0
+          git add manual/output/Nati_Clip_02_v2.mp4 manual/output/Nati_Clip_03_v2.mp4 manual/output/Nati_Clip_04_v2.mp4 manual/output/Nati_Clip_05_v2.mp4 manual/output/Nati_Clip_06_v2.mp4
+          git commit -m "Render five Nati Varez clips" || exit 0
           git pull --rebase origin main
           git push
