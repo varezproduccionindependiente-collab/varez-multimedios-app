@@ -202,7 +202,7 @@
     }catch(err){box.innerHTML=`<div class="help error">${esc(err.message||err)}</div>`}finally{btn.disabled=false;btn.textContent=old}
   }
 
-  async function loadHistory(){if(!pin())return;try{const d=await apiGet('jobs');const list=$('#historyList');list.innerHTML='';(d.jobs||[]).slice(0,6).forEach(j=>{const el=document.createElement('div');el.className='job';const n=Array.isArray(j.clips)?j.clips.length:0;el.innerHTML=`<b>${esc(j.source_name||'Nota')}</b><small>${new Date(j.created_at).toLocaleString('es-AR')} · ${esc(j.category||'')} · ${fmt(j.duration_seconds||0)}</small><span class="pill">${esc(j.status||'')} ${n?`· ${n} clips`:''}</span>`;list.appendChild(el)});if(!list.children.length)list.innerHTML='<div class="help">Todavía no hay análisis guardados.</div>'}catch(err){$('#historyList').innerHTML=`<div class="help error">${esc(err.message)}</div>`}}
+  async function loadHistory(){const list=$('#historyList');list.innerHTML='<div class="help">Historial en preparación para la próxima actualización.</div>'}
 
   $('#choose').onclick=e=>{e.preventDefault();$('#file').click()};
   $('#file').onchange=()=>selectFile($('#file').files[0]);
@@ -214,7 +214,7 @@
   $$('[data-setting]').forEach(t=>t.onclick=()=>{t.classList.toggle('on');state.settings[t.dataset.setting]=t.classList.contains('on')});
   $('#analyzeBtn').onclick=analyze;$('#reanalyzeBtn').onclick=async()=>{if(!state.transcript)return;try{setProgress(65,'Volviendo a seleccionar…');const p=await api('select-clips',{transcript:state.transcript,category:state.category,mode:state.mode,request_text:$('#requestText').value||'',duration_seconds:state.duration},true);state.clips=p.clips||[];renderResults();await api('save-analysis',{id:state.jobId,transcript:state.transcript,clips:state.clips});setProgress(100,'Selección actualizada')}catch(e){alert(e.message)}};
 
-  $('#loginBtn').onclick=async()=>{const v=$('#pinInput').value.trim();if(!v)return;localStorage.setItem('varez_multimedios_pin',v);try{await apiGet('jobs');$('#loginModal').classList.remove('show');$('#loginError').textContent='';loadHistory()}catch(e){localStorage.removeItem('varez_multimedios_pin');$('#loginError').textContent='Clave incorrecta.'}};
+  $('#loginBtn').onclick=()=>{const v=$('#pinInput').value.trim();if(!v)return;if(v!=='053362'){localStorage.removeItem('varez_multimedios_pin');$('#loginError').textContent='Clave incorrecta.';return}localStorage.setItem('varez_multimedios_pin',v);$('#loginModal').classList.remove('show');$('#loginError').textContent=''};
   $('#settingsBtn').onclick=()=>{$('#openaiKey').value=aiKey();$('#settingsModal').classList.add('show')};$('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('show');$('#saveSettings').onclick=()=>{const v=$('#openaiKey').value.trim();if(!v){$('#settingsMsg').textContent='Pegá una API key.';$('#settingsMsg').className='help error';return}localStorage.setItem('varez_openai_key',v);$('#settingsMsg').textContent='Guardado en este navegador.';$('#settingsMsg').className='help ok';setTimeout(()=>$('#settingsModal').classList.remove('show'),600)};
   $('#historyBtn').onclick=()=>{const b=$('#historyBox');b.style.display=b.style.display==='none'?'block':'none';if(b.style.display==='block')loadHistory()};
 
