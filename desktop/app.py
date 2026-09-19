@@ -5,6 +5,8 @@ import os
 import subprocess
 import threading
 import uuid
+import shutil
+import time
 from pathlib import Path
 
 import psutil
@@ -29,9 +31,41 @@ from core import run_job, detect_runtime, choose_ollama_model
 
 CONFIG_PATH = DATA / "config.json"
 
+def persist_model_paths():
+    if os.name != "nt":
+        return
+    pairs = {
+        "OLLAMA_MODELS": str(MODELS / "ollama"),
+        "HF_HOME": str(MODELS / "huggingface"),
+        "HUGGINGFACE_HUB_CACHE": str(MODELS / "huggingface" / "hub"),
+    }
+    for key, value in pairs.items():
+        try:
+            subprocess.run(
+                ["setx", key, value],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=8,
+            )
+        except Exception:
+            pass
+
+def find_ollama_exe():
+    candidates = [
+        shutil.which("ollama"),
+        str(Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"),
+        r"C:\Program Files\Ollama\ollama.exe",
+    ]
+    for item in candidates:
+        if item and Path(item).exists():
+            return item
+    return None
+
 
 class API:
     def __init__(self):
+        persist_model_paths()
         self.video_path = None
         self.lock = threading.Lock()
         self.config = self._load_config()
@@ -92,6 +126,7 @@ class API:
         return self.system_info()
 
     def install_ollama(self):
+        persist_model_paths()
         try:
             subprocess.Popen(
                 [
@@ -105,11 +140,39 @@ class API:
             return {"ok": False, "message": str(e)}
 
     def prepare_ai(self):
+        persist_model_paths()
         model = self.config["ollama_model"]
+        if psutil.virtual_memory().total / 1024**3 < 24 and model == "gpt-oss:20b":
+            model = "qwen3:8b"
+            self.config["ollama_model"] = model
+            self._save_config()
         try:
             requests.get("http://127.0.0.1:11434/api/tags", timeout=2).raise_for_status()
         except Exception:
-            return {"ok": False, "message": "Ollama todavía no está ejecutándose."}
+            exe = find_ollama_exe()
+            if not exe:
+                return {"ok": False, "message": "Ollama todavía se está instalando. Esperá a que termine y volvé a tocar Preparar IA local."}
+            try:
+                env = os.environ.copy()
+                env["OLLAMA_MODELS"] = str(MODELS / "ollama")
+                subprocess.Popen(
+                    [exe, "serve"],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                for _ in range(10):
+                    time.sleep(0.5)
+                    try:
+                        requests.get("http://127.0.0.1:11434/api/tags", timeout=1).raise_for_status()
+                        break
+                    except Exception:
+                        pass
+                else:
+                    return {"ok": False, "message": "Ollama está instalado pero todavía no pudo iniciar. Cerrá y abrí Varez e intentá otra vez."}
+            except Exception as e:
+                return {"ok": False, "message": "No pude iniciar Ollama: " + str(e)}
 
         def pull():
             with self.lock:
