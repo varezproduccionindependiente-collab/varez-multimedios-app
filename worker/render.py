@@ -1,42 +1,63 @@
 #!/usr/bin/env python3
-import argparse, json, subprocess, tempfile, requests, sys, re
+import argparse, json, os, subprocess, tempfile, requests, sys, re
 from pathlib import Path
 
-def get_json(url):
-    r=requests.get(url,timeout=120)
-    r.raise_for_status()
-    return r.json()
+API="https://api.github.com"
+OWNER="varezproduccionindependiente-collab"
+REPO="varez-multimedios-app"
+TOKEN=os.environ["GH_TOKEN"]
+HEAD={
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept":"application/vnd.github+json",
+    "X-GitHub-Api-Version":"2026-03-10",
+}
 
-def download(url,path):
-    with requests.get(url,stream=True,timeout=600) as r:
-        r.raise_for_status()
-        with open(path,"wb") as f:
-            for chunk in r.iter_content(1024*1024):
-                if chunk: f.write(chunk)
-
-def upload_signed(url,path,ctype="video/mp4"):
-    with open(path,"rb") as f:
-        r=requests.put(url,data=f,headers={
-            "content-type":ctype,
-            "cache-control":"max-age=3600",
-            "x-upsert":"true",
-        },timeout=1200)
+def req(method,url,**kwargs):
+    h=dict(HEAD); h.update(kwargs.pop("headers",{}))
+    r=requests.request(method,url,headers=h,timeout=600,**kwargs)
     if r.status_code>=400:
-        raise RuntimeError(f"Supabase upload {r.status_code}: {r.text[:500]}")
+        raise RuntimeError(f"{method} {url} -> {r.status_code}: {r.text[:500]}")
+    return r
+
+def list_assets(release_id):
+    return req("GET",f"{API}/repos/{OWNER}/{REPO}/releases/{release_id}/assets?per_page=100").json()
+
+def download_asset(asset,path):
+    h={"Accept":"application/octet-stream"}
+    r=req("GET",asset["url"],headers=h,allow_redirects=True,stream=True)
+    with open(path,"wb") as f:
+        for chunk in r.iter_content(1024*1024):
+            if chunk: f.write(chunk)
+
+def delete_asset(asset_id):
+    req("DELETE",f"{API}/repos/{OWNER}/{REPO}/releases/assets/{asset_id}")
+
+def upload_asset(release_id,path,name,ctype="application/octet-stream"):
+    url=f"https://uploads.github.com/repos/{OWNER}/{REPO}/releases/{release_id}/assets"
+    with open(path,"rb") as f:
+        r=requests.post(url,params={"name":name},headers={
+            "Authorization":f"Bearer {TOKEN}",
+            "Accept":"application/vnd.github+json",
+            "X-GitHub-Api-Version":"2026-03-10",
+            "Content-Type":ctype,
+        },data=f,timeout=1800)
+    if r.status_code>=400:
+        raise RuntimeError(f"upload {name}: {r.status_code} {r.text[:500]}")
+    return r.json()
 
 def at(sec):
     sec=max(0.0,float(sec or 0))
     h=int(sec//3600); m=int((sec%3600)//60); s=sec%60
     return f"{h}:{m:02d}:{s:05.2f}"
 
-def esc(s):
+def ass_escape(s):
     return str(s or "").replace("{","").replace("}","").replace("\n"," ").strip()
 
-def make_ass(words,path):
+def make_ass(words, out_path):
     words=[w for w in (words or []) if str(w.get("word","")).strip()]
     groups=[]; g=[]
-    for raw in words:
-        w={"word":str(raw["word"]).strip(),"start":float(raw.get("start",0)),"end":float(raw.get("end",0))}
+    for w in words:
+        w={"word":str(w["word"]).strip(),"start":float(w.get("start",0)),"end":float(w.get("end",0))}
         gap=w["start"]-(g[-1]["end"] if g else w["start"])
         chars=sum(len(x["word"])+1 for x in g)+len(w["word"])
         if g and (len(g)>=4 or gap>.55 or chars>28):
@@ -58,21 +79,23 @@ Style: Varez,Arial,82,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,1
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
-    white="&H00FFFFFF&"; yellow="&H0033D6FF&"; lines=[]
+    lines=[]; white="&H00FFFFFF&"; yellow="&H0033D6FF&"
     for group in groups:
         for i,w in enumerate(group):
-            st=w["start"]
-            en=max(w["end"],group[i+1]["start"]) if i<len(group)-1 else w["end"]+.15
-            text=" ".join("{\\c"+(yellow if j==i else white)+"}"+esc(x["word"]).upper() for j,x in enumerate(group))
-            lines.append(f"Dialogue: 0,{at(st)},{at(en)},Varez,,0,0,0,,{text}")
-    Path(path).write_text(head+"\n".join(lines),encoding="utf-8")
+            st=w["start"]; en=(max(w["end"],group[i+1]["start"]) if i<len(group)-1 else w["end"]+.15)
+            txt=" ".join(
+                "{\\c"+(yellow if j==i else white)+"}"+ass_escape(x["word"]).upper()
+                for j,x in enumerate(group)
+            )
+            lines.append(f"Dialogue: 0,{at(st)},{at(en)},Varez,,0,0,0,,{txt}")
+    Path(out_path).write_text(head+"\n".join(lines),encoding="utf-8")
 
-def render(src,out,ass,c):
-    offset=max(0,float(c.get("source_offset",0)))
-    duration=max(1,float(c.get("duration",0)))
-    q=float(c.get("question_end_rel") or 0)
-    captions=bool(c.get("captions",True))
-    qa=bool(c.get("qa",True)) and .7<q<duration-.7
+def run_ffmpeg(src, out, ass, clip):
+    source_offset=max(0,float(clip.get("source_offset",0)))
+    duration=max(1,float(clip["end"])-float(clip["start"]))
+    q=float(clip.get("question_end_rel") or 0)
+    captions=bool(clip.get("captions",True))
+    qa=bool(clip.get("qa",True)) and q>.7 and q<duration-.7
 
     base="setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     fc=[]
@@ -83,23 +106,22 @@ def render(src,out,ass,c):
             f"[vr0]trim=start={q:.3f},setpts=PTS-STARTPTS[vr]",
             "[vq][vr]concat=n=2:v=1:a=0[vbase]",
             "[0:a]asetpts=PTS-STARTPTS,asplit=2[aq0][ar0]",
-            f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,acompressor=threshold=-18dB:ratio=3,volume=1.05[aq]",
+            f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=320,lowpass=f=3300,volume=1.08[aq]",
             f"[ar0]atrim=start={q:.3f},asetpts=PTS-STARTPTS[ar]",
             "[aq][ar]concat=n=2:v=0:a=1[abase]",
         ]
     else:
         fc += [f"[0:v]{base}[vbase]","[0:a]asetpts=PTS-STARTPTS[abase]"]
-
     if captions:
-        ae=str(ass).replace("\\","\\\\").replace(":","\\:")
-        fc.append(f"[vbase]subtitles='{ae}'[v]")
+        ass_escaped=str(ass).replace("\\","\\\\").replace(":","\\:")
+        fc.append(f"[vbase]subtitles='{ass_escaped}'[v]")
     else:
         fc.append("[vbase]null[v]")
     fc.append("[abase]loudnorm=I=-16:TP=-1.5:LRA=11[a]")
 
     cmd=[
         "ffmpeg","-hide_banner","-loglevel","error","-y",
-        "-ss",str(offset),"-t",str(duration),"-i",str(src),
+        "-ss",str(source_offset),"-t",str(duration),"-i",str(src),
         "-filter_complex",";".join(fc),
         "-map","[v]","-map","[a]",
         "-c:v","libx264","-preset","veryfast","-crf","21","-pix_fmt","yuv420p",
@@ -109,25 +131,42 @@ def render(src,out,ass,c):
 
 def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument("--manifest-url",required=True)
+    ap.add_argument("--release-id",required=True,type=int)
     ap.add_argument("--job-id",required=True)
     a=ap.parse_args()
-    manifest=get_json(a.manifest_url)
-    clips=manifest.get("clips",[])
-    if len(clips)!=5: raise RuntimeError("El manifest no tiene 5 clips.")
+    rid=a.release_id; jid=a.job_id
+    assets=list_assets(rid)
+    amap={x["name"]:x for x in assets}
+    manifest_name=f"{jid}-manifest.json"
+    if manifest_name not in amap: raise RuntimeError("Manifest no encontrado")
     with tempfile.TemporaryDirectory() as td:
         td=Path(td)
-        for i,c in enumerate(clips,1):
-            src=td/f"source-{i:02d}.mp4"
-            ass=td/f"clip-{i:02d}.ass"
-            out=td/f"output-{i:02d}.mp4"
-            download(c["source_url"],src)
-            make_ass(c.get("words",[]),ass)
-            render(src,out,ass,c)
-            upload_signed(c["output_upload_url"],out)
+        mpath=td/"manifest.json"; download_asset(amap[manifest_name],mpath)
+        manifest=json.loads(mpath.read_text("utf-8"))
+        made=[]
+        for i,clip in enumerate(manifest["clips"],1):
+            src_name=f"{jid}-source-{i:02d}.mp4"
+            if src_name not in amap: raise RuntimeError(f"Falta {src_name}")
+            src=td/src_name; download_asset(amap[src_name],src)
+            ass=td/f"clip-{i:02d}.ass"; make_ass(clip.get("words",[]),ass)
+            out=td/f"{jid}-output-{i:02d}.mp4"
+            run_ffmpeg(src,out,ass,clip)
+            old=[x for x in list_assets(rid) if x["name"]==out.name]
+            for x in old: delete_asset(x["id"])
+            upload_asset(rid,out,out.name,"video/mp4")
+            made.append(out.name)
+        done=td/f"{jid}-done.json"
+        done.write_text(json.dumps({"ok":True,"job_id":jid,"outputs":made}),encoding="utf-8")
+        upload_asset(rid,done,done.name,"application/json")
+        # remove temporary source assets and manifest after success
+        refreshed=list_assets(rid)
+        for x in refreshed:
+            if x["name"]==manifest_name or x["name"].startswith(f"{jid}-source-"):
+                delete_asset(x["id"])
 
 if __name__=="__main__":
-    try: main()
+    try:
+        main()
     except Exception as e:
         print(str(e),file=sys.stderr)
         raise
