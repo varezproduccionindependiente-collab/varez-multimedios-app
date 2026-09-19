@@ -45,8 +45,9 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     Path(path).write_text("".join(lines),encoding="utf-8")
 
 task=json.loads(Path("manual/render_task.json").read_text())
-src=Path("/tmp/source.mp4")
-sh([sys.executable,"-m","gdown",task["drive_file_id"],"-O",str(src)])
+src=Path(os.environ.get("SOURCE_PATH","/tmp/source.mp4"))
+if not src.exists():
+    sh([sys.executable,"-m","gdown",task["drive_file_id"],"-O",str(src)])
 
 from faster_whisper import WhisperModel
 model=WhisperModel("small",device="cpu",compute_type="int8")
