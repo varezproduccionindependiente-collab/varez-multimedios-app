@@ -1,0 +1,135 @@
+name: Manual Varez Transcribe Fast
+
+on:
+  push:
+    paths:
+      - "manual/fast_task.json"
+
+permissions:
+  contents: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install gdown
+      - name: Download and split audio
+        id: matrix
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess, sys
+          task=json.loads(pathlib.Path("manual/fast_task.json").read_text())
+          file_id=task["drive_file_id"]
+          subprocess.run([sys.executable,"-m","gdown",file_id,"-O","/tmp/source.mp4"],check=True)
+          meta=json.loads(subprocess.check_output([
+              "ffprobe","-v","error","-show_entries","format=duration:stream=width,height",
+              "-of","json","/tmp/source.mp4"
+          ],text=True))
+          pathlib.Path("/tmp/meta.json").write_text(json.dumps({
+              "job_id":task["job_id"],
+              "drive_file_id":file_id,
+              "title":task.get("title",""),
+              "duration":float(meta.get("format",{}).get("duration") or 0),
+              "streams":meta.get("streams",[])
+          }))
+          pathlib.Path("/tmp/chunks").mkdir()
+          subprocess.run([
+              "ffmpeg","-y","-loglevel","error","-i","/tmp/source.mp4","-vn","-ac","1","-ar","16000",
+              "-c:a","libmp3lame","-b:a","48k","-f","segment","-segment_time","300",
+              "-reset_timestamps","1","/tmp/chunks/chunk_%03d.mp3"
+          ],check=True)
+          files=sorted(pathlib.Path("/tmp/chunks").glob("chunk_*.mp3"))
+          matrix=[int(f.stem.split("_")[1]) for f in files]
+          with open("/tmp/matrix.txt","w") as f: f.write(json.dumps(matrix))
+          PY
+          echo "matrix=$(cat /tmp/matrix.txt)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcript-audio-chunks
+          path: /tmp/chunks/*.mp3
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcript-meta
+          path: /tmp/meta.json
+          retention-days: 1
+
+  transcribe:
+    needs: prep
+    strategy:
+      fail-fast: false
+      matrix:
+        idx: ${{ fromJson(needs.prep.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install whisper
+        run: pip install faster-whisper
+      - uses: actions/download-artifact@v4
+        with:
+          name: transcript-audio-chunks
+          path: /tmp/chunks
+      - name: Transcribe chunk
+        env:
+          CHUNK_INDEX: ${{ matrix.idx }}
+          CHUNK_SECONDS: "300"
+        run: python worker/manual_transcribe_chunk.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcript-json-${{ matrix.idx }}
+          path: /tmp/out/*.json
+          retention-days: 1
+
+  merge:
+    needs: transcribe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: transcript-json-*
+          path: /tmp/json
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: transcript-meta
+          path: /tmp/meta
+      - name: Merge transcript
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          meta=json.loads(pathlib.Path("/tmp/meta/meta.json").read_text())
+          segments=[]
+          language="es"
+          for p in sorted(pathlib.Path("/tmp/json").glob("chunk_*.json")):
+              d=json.loads(p.read_text())
+              language=d.get("language",language)
+              segments.extend(d.get("segments",[]))
+          segments.sort(key=lambda x:x["start"])
+          meta["language"]=language
+          meta["segments"]=segments
+          pathlib.Path("manual/transcript.json").write_text(json.dumps(meta,ensure_ascii=False,indent=2))
+          print("segments",len(segments),"duration",meta["duration"])
+          PY
+      - name: Save transcript
+        run: |
+          git config user.name "Varez Worker"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main
+          git add manual/transcript.json
+          git commit -m "Add fast manual transcript" || exit 0
+          git pull --rebase origin main
+          git push
