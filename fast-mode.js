@@ -28,7 +28,7 @@
     if(bar) bar.style.width='20%';
     if(label) label.textContent='Esperando a Gemini…';
     if(log){
-      log.textContent='Límite momentáneo. Reintento automático en '+Math.ceil(ms/1000)+' s con el mismo modelo.';
+      log.textContent='Límite momentáneo. Reintento automático en '+Math.ceil(ms/1000)+' s; si sigue ocupado, se probará otro modelo.';
       log.className='log';
     }
   }
@@ -37,8 +37,9 @@
     const rawUrl = typeof input === 'string' ? input : input?.url;
     if(!isGeminiGenerate(rawUrl)) return nativeFetch(input, init);
 
-    const url = rawUrl.replace(/models\/gemini-[^:]+:generateContent/, 'models/gemini-3.6-flash:generateContent');
-    let response = await nativeFetch(url, {...init});
+    // Respect the model selected by app.js. Rewriting every URL here used to
+    // defeat the fallback chain by sending every attempt to the same model.
+    let response = await nativeFetch(input, {...init});
 
     if(response.status===429){
       let raw='';
@@ -46,14 +47,7 @@
       const wait=quotaWaitMs(raw);
       setQuotaProgress(wait);
       await new Promise(resolve=>setTimeout(resolve,wait));
-      response=await nativeFetch(url, {...init});
-
-      if(response.status===429){
-        return new Response(
-          JSON.stringify({error:'Gemini sigue con límite momentáneo. Volvé a iniciar el análisis dentro de unos segundos.'}),
-          {status:400,headers:{'Content-Type':'application/json'}}
-        );
-      }
+      response=await nativeFetch(input, {...init});
     }
     return response;
   };
