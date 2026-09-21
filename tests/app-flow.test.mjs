@@ -12,9 +12,10 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false,batchF
   const document={querySelector(selector){if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector)},querySelectorAll(){return []},createElement:element};
   const memory=new Map([['varez_gemini_key','fixture'],['varez_groq_key','fixture'],['varez_github_pat','fixture']]);
   const storage={getItem:k=>memory.get(k)||null,setItem:(k,v)=>memory.set(k,v)};
-  const words='La cultura nos salva. Trabajamos cada día para que todos puedan participar. Ese es nuestro compromiso. Ahora empieza otra pregunta'.split(' ').map((word,i)=>({word,start:i*.4+4.1,end:i*.4+4.44}));
-  const batchWords=Array.from({length:count},(_,clipIndex)=>words.map(word=>({...word,start:word.start+clipIndex*15.7,end:word.end+clipIndex*15.7}))).flat();
-  const clips=Array.from({length:count},(_,i)=>({title:`Clip ${i+1}`,start:5+i*20,end:11.9+i*20,hook_end:6.7+i*20,hook_closing_words:i===3&&rejectFourth?'cita ausente':'La cultura nos salva',opening_words:'La cultura nos salva',closing_words:'Ese es nuestro compromiso',question_start:-1,question_end:-1,reason:'Idea completa',boundary_check:'Inicio y cierre completos'}));
+  const opening='La cultura nos salva porque construye una comunidad con memoria'.split(' '),middle=Array.from({length:65},(_,i)=>`desarrollo${i}`),hook='Sin cultura nuestra comunidad pierde su memoria su voz y también todo su futuro'.split(' '),closing='Por eso sostener estos espacios es nuestro compromiso con toda la comunidad'.split(' '),core=[...opening,...middle,...hook,...closing],tokens=[...core,'Ahora','empieza','otra','pregunta'];
+  const words=tokens.map((word,i)=>({word,start:i*.45+4.1,end:i*.45+4.44})),last=core.length-1,hookFirst=opening.length+middle.length,hookLast=hookFirst+hook.length-1,quote=(from,to)=>words.slice(from,to+1).map(w=>w.word).join(' '),clipLength=words[last].end-4,rangeDuration=clipLength+8;
+  const batchWords=Array.from({length:count},(_,clipIndex)=>words.map(word=>({...word,start:word.start+clipIndex*(rangeDuration+.8),end:word.end+clipIndex*(rangeDuration+.8)}))).flat();
+  const clips=Array.from({length:count},(_,i)=>{const start=5+i*70,contextStart=start-4;return{title:`Clip ${i+1}`,start,end:start+clipLength,hook_start:contextStart+words[hookFirst].start,hook_end:contextStart+words[hookLast].end,hook_opening_words:quote(hookFirst,hookFirst+5),hook_closing_words:i===3&&rejectFourth?'cita ausente':quote(hookLast-5,hookLast),opening_words:quote(0,7),closing_words:quote(last-7,last),question_start:-1,question_end:-1,context_start_complete:true,context_end_complete:true,hook_context_complete:true,single_contiguous_hook:true,reason:'Idea completa',boundary_check:'Inicio y cierre completos'}});
   let manifests=[],outputs=[],dispatches=0,repairs=0,transcriptions=0;
   const json=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
   const fetch=async(url,options={})=>{
@@ -41,11 +42,11 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false,batchF
     }
     assert.fail('Unexpected request: '+url);
   };
-  const environment={...editorial,document,localStorage:storage,crypto:webcrypto,Blob,File,FormData,Response,AbortController,URL,setTimeout,clearTimeout,fetch,console,alert:msg=>assert.fail(msg),createClient:()=>({storage:{from:()=>({uploadToSignedUrl:async(path,token,blob)=>{if(path.endsWith('.json'))manifests.push(JSON.parse(await blob.text()));return {error:null}}})}})};
+  const environment={...editorial,document,localStorage:storage,crypto:webcrypto,Blob,File,FormData,Response,AbortController,URL,setTimeout,clearTimeout,setInterval,clearInterval,fetch,console,alert:msg=>assert.fail(msg),createClient:()=>({storage:{from:()=>({uploadToSignedUrl:async(path,token,blob)=>{if(path.endsWith('.json'))manifests.push(JSON.parse(await blob.text()));return {error:null}}})}})};
   let context=vm.createContext(environment);
   const code=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
   vm.runInContext(code,context);
-  vm.runInContext("getFF=async()=>({exec:async()=>0,read:async()=>new Uint8Array([1,2,3]),del:async()=>{}});S.file=new File(['fixture video'],'interview.mp4',{type:'video/mp4'});S.dur=200;",context);
+  vm.runInContext("getFF=async()=>({exec:async()=>0,read:async()=>new Uint8Array([1,2,3]),del:async()=>{}});S.file=new File(['fixture video'],'interview.mp4',{type:'video/mp4'});S.dur=400;",context);
   await vm.runInContext('runJob()',context);
   const result=JSON.parse(JSON.stringify(vm.runInContext('S.job',context)));
   assert.equal(result.phase,'done');assert.equal(result.outputPaths.length,count-(rejectFourth||interruptFourth?1:0));
@@ -56,7 +57,7 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false,batchF
     context=vm.createContext({...environment});
     vm.runInContext(code,context);
     // Reload first, then reselect the original file. The old job ID and completed clips survive.
-    vm.runInContext("getFF=async()=>({exec:async()=>0,read:async()=>new Uint8Array([1,2,3]),del:async()=>{}});S.file=new File(['fixture video'],'interview.mp4',{type:'video/mp4'});S.dur=200;",context);
+    vm.runInContext("getFF=async()=>({exec:async()=>0,read:async()=>new Uint8Array([1,2,3]),del:async()=>{}});S.file=new File(['fixture video'],'interview.mp4',{type:'video/mp4'});S.dur=400;",context);
     await vm.runInContext('runJob()',context);
     assert.equal(dispatches,2);
     assert.equal(transcriptions,6,'only the failed fourth clip is transcribed again');
@@ -68,7 +69,8 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false,batchF
     assert.equal(dispatches,count?1:0,'reopening results must not repeat render');
     assert.equal(transcriptions,batchFast&&count?1:count,'reopening results must reuse transcripts');
   }
-  assert.equal(JSON.parse(memory.get('varez_multimedios_job_v32')).phase,'done');
+  assert.equal(JSON.parse(memory.get('varez_multimedios_job_v33')).phase,'done');
+  assert.match(nodes.get('#elapsed').textContent,/^\d{2}:\d{2}(?::\d{2})?$/);
   return result;
 }
 test('actual app delivers two clips with two outputs; does not wait for five',()=>runScenario(2));
