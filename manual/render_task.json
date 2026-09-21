@@ -1,42 +1,42 @@
 {
-  "drive_file_id": "15GecvyjJUdZCvGcumXjdzURCqlQqohKt",
-  "revision": "fmciudad-audicion-5clips-varez-v2",
+  "drive_file_id": "1DFuxQoqd4U8r7yKq8gKW8BwvR0J-aQfM",
+  "revision": "fmciudad-vetes-5clips-varez-v1",
   "clips": [
     {
-      "name": "FM_Ciudad_Clip_01_Vertigo_vs_Mareo",
-      "body_start": 94.0,
-      "body_end": 149.0,
-      "hook_start": 114.0,
-      "hook_end": 122.0
+      "name": "FM_Ciudad_Vetes_Clip_01_Preparar_Consulta",
+      "body_start": 101.4,
+      "body_end": 173.04,
+      "hook_start": 147.56,
+      "hook_end": 153.12
     },
     {
-      "name": "FM_Ciudad_Clip_02_Panico_vs_Vertigo",
-      "body_start": 249.0,
-      "body_end": 336.0,
-      "hook_start": 262.0,
-      "hook_end": 269.0
+      "name": "FM_Ciudad_Vetes_Clip_02_Gatos_Transportadora",
+      "body_start": 189.28,
+      "body_end": 282.28,
+      "hook_start": 222.36,
+      "hook_end": 230.6
     },
     {
-      "name": "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado",
-      "body_start": 406.0,
-      "body_end": 492.0,
-      "hook_start": 433.0,
-      "hook_end": 440.0
+      "name": "FM_Ciudad_Vetes_Clip_03_Refuerzo_Positivo",
+      "body_start": 639.16,
+      "body_end": 691.48,
+      "hook_start": 667.96,
+      "hook_end": 678.48
     },
     {
-      "name": "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes",
-      "body_start": 711.0,
-      "body_end": 797.0,
-      "hook_start": 752.0,
-      "hook_end": 762.0
+      "name": "FM_Ciudad_Vetes_Clip_04_Adiestrador_vs_Etologo",
+      "body_start": 971.64,
+      "body_end": 1046.64,
+      "hook_start": 1021.64,
+      "hook_end": 1032.64
     },
     {
-      "name": "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia",
-      "body_start": 1023.0,
-      "body_end": 1056.0,
-      "hook_start": 1039.0,
-      "hook_end": 1048.0
+      "name": "FM_Ciudad_Vetes_Clip_05_Acercarse_Perro_Miedoso",
+      "body_start": 1113.14,
+      "body_end": 1174.14,
+      "hook_start": 1165.14,
+      "hook_end": 1174.14
     }
   ],
-  "nonce": 6
+  "nonce": 7
 }
