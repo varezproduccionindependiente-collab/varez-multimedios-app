@@ -7,6 +7,8 @@ API="https://api.github.com"
 OWNER="varezproduccionindependiente-collab"
 REPO="varez-multimedios-app"
 TOKEN=os.environ["GH_TOKEN"]
+MIN_HOOK_SECONDS=4.5
+MAX_HOOK_SECONDS=9.5
 HEAD={
     "Authorization": f"Bearer {TOKEN}",
     "Accept":"application/vnd.github+json",
@@ -99,29 +101,88 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             lines.append(f"Dialogue: 0,{at(st)},{at(en)},Varez,,0,0,0,,{txt}")
     Path(out_path).write_text(head+"\n".join(lines),encoding="utf-8")
 
-def build_body_segments(words, duration, min_gap=.32, kept_gap=.14):
-    duration=max(0.0,float(duration))
-    clean=sorted((dict(w,start=float(w.get("start",0)),end=float(w.get("end",0))) for w in (words or [])
-                  if float(w.get("end",0))>float(w.get("start",0))),key=lambda w:w["start"])
-    if len(clean)<2: return [(0.0,duration)]
-    segments=[]; start=0.0; side=kept_gap/2
-    for left,right in zip(clean,clean[1:]):
-        gap=max(0.0,right["start"]-left["end"])
-        if gap<min_gap: continue
-        end=min(duration,left["end"]+side)
-        next_start=max(0.0,right["start"]-side)
-        if next_start-end<.12: continue
-        if end-start>=.08: segments.append((start,end))
-        start=next_start
-    if duration-start>=.08: segments.append((start,duration))
+def clean_spoken_token(value):
+    return re.sub(r"[^a-záéíóúüñ]", "", str(value or "").lower())
+
+def is_filler_token(value):
+    token=clean_spoken_token(value)
+    return bool(re.fullmatch(r"(?:e{2,}|e+h+|e+h*m+|em+|m{2,}|a+h+|u+h+)",token))
+
+def merge_intervals(intervals, duration, tolerance=.12):
+    merged=[]
+    for start,end in sorted((max(0.0,float(a)),min(float(duration),float(b))) for a,b in intervals if float(b)>float(a)):
+        if end-start<.025: continue
+        if merged and start<=merged[-1][1]+tolerance: merged[-1]=(merged[-1][0],max(merged[-1][1],end))
+        else: merged.append((start,end))
+    return merged
+
+def subtract_protected(interval, protected):
+    pieces=[interval]
+    for ps,pe in protected:
+        next_pieces=[]
+        for start,end in pieces:
+            if pe<=start or ps>=end: next_pieces.append((start,end));continue
+            if ps>start: next_pieces.append((start,min(ps,end)))
+            if pe<end: next_pieces.append((max(pe,start),end))
+        pieces=next_pieces
+    return pieces
+
+def cuts_to_segments(cuts, duration):
+    cuts=merge_intervals(cuts,duration);segments=[];cursor=0.0
+    for start,end in cuts:
+        if start-cursor>=.08: segments.append((cursor,start))
+        cursor=max(cursor,end)
+    if duration-cursor>=.08: segments.append((cursor,duration))
     return segments or [(0.0,duration)]
 
-def remap_words(words, segments, segment_offset=0):
+def measure_mean_volume(src, source_offset, duration):
+    cmd=["ffmpeg","-hide_banner","-nostats","-ss",str(source_offset),"-t",str(duration),"-i",str(src),"-vn","-af","volumedetect","-f","null","-"]
+    proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+    match=re.search(r"mean_volume:\s*(-?[0-9.]+)\s*dB",proc.stderr or "")
+    return float(match.group(1)) if match else None
+
+def detect_waveform_silences(src, source_offset, duration, min_silence=.28):
+    mean=measure_mean_volume(src,source_offset,duration)
+    threshold=max(-48.0,min(-34.0,(mean-14.0) if mean is not None else -42.0))
+    cmd=["ffmpeg","-hide_banner","-nostats","-ss",str(source_offset),"-t",str(duration),"-i",str(src),"-vn","-af",f"asetpts=PTS-STARTPTS,silencedetect=noise={threshold:.1f}dB:d={min_silence}","-f","null","-"]
+    proc=subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+    starts=[];silences=[]
+    for line in (proc.stderr or "").splitlines():
+        found=re.search(r"silence_start:\s*([0-9.]+)",line)
+        if found: starts.append(float(found.group(1)))
+        found=re.search(r"silence_end:\s*([0-9.]+)",line)
+        if found:
+            start=starts.pop(0) if starts else 0.0
+            silences.append((start,min(float(duration),float(found.group(1)))))
+    silences.extend((start,float(duration)) for start in starts)
+    return merge_intervals(silences,duration),threshold
+
+def build_body_segments(words, duration, waveform_silences=None, min_gap=.28, kept_gap=.14):
+    duration=max(0.0,float(duration))
+    clean=sorted((dict(w,start=max(0.0,float(w.get("start",0))),end=min(duration,float(w.get("end",0)))) for w in (words or []) if float(w.get("end",0))>float(w.get("start",0))),key=lambda w:w["start"])
+    if not clean: return [(0.0,duration)]
+    protected=merge_intervals(((w["start"]-.055,w["end"]+.055) for w in clean),duration)
+    cuts=[];side=kept_gap/2
+    for silence in waveform_silences or []:
+        for start,end in subtract_protected(silence,protected):
+            if end-start>=min_gap: cuts.append((start+side,end-side))
+    i=0
+    while i<len(clean):
+        if not is_filler_token(clean[i].get("word")):i+=1;continue
+        first=i
+        while i+1<len(clean) and is_filler_token(clean[i+1].get("word")):i+=1
+        last=i;left=max(0.0,clean[first]["start"]-.06);right=min(duration,clean[last]["end"]+.06)
+        if .08<right-left<2.8:cuts.append((left,right))
+        i+=1
+    return cuts_to_segments(cuts,duration)
+
+def remap_words(words, segments, segment_offset=0, drop_fillers=False):
     offsets=[]; cursor=0.0
     for start,end in segments:
         offsets.append(cursor);cursor+=end-start
     mapped=[]
     for word in words or []:
+        if drop_fillers and is_filler_token(word.get("word")): continue
         ws=float(word.get("start",0));we=float(word.get("end",0));mid=(ws+we)/2
         for i,(start,end) in enumerate(segments):
             if start-.04<=mid<=end+.04:
@@ -132,13 +193,15 @@ def remap_words(words, segments, segment_offset=0):
                 break
     return mapped
 
-def body_plan(clip):
+def body_plan(clip, src=None):
     duration=max(1,float(clip["end"])-float(clip["start"]))
     if clip.get("remove_pauses",False):
-        segments=build_body_segments(clip.get("words",[]),duration)
+        silences=clip.get("waveform_silences")
+        if silences is None and src is not None: silences,_=detect_waveform_silences(src,max(0,float(clip.get("source_offset",0))),duration)
+        segments=build_body_segments(clip.get("words",[]),duration,silences or [])
     else:
         segments=[(0.0,duration)]
-    return segments,remap_words(clip.get("words",[]),segments,1),sum(end-start for start,end in segments)
+    return segments,remap_words(clip.get("words",[]),segments,1,clip.get("remove_pauses",False)),sum(end-start for start,end in segments)
 
 def append_body_filters(fc, segments, base):
     count=len(segments)
@@ -153,14 +216,15 @@ def append_body_filters(fc, segments, base):
     fc.extend([f"[0:v]split={count}{vsrc}",f"[0:a]asplit={count}{asrc}"])
     chain=[]
     for i,(start,end) in enumerate(segments):
+        seg_duration=end-start;fade=min(.008,max(.002,seg_duration/10))
         fc.extend([
             f"[vsrc{i}]trim=start={start:.6f}:end={end:.6f},setpts=PTS-STARTPTS,{base}[bv{i}]",
-            f"[asrc{i}]atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS,aresample=48000[ba{i}]",
+            f"[asrc{i}]atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS,aresample=48000,afade=t=in:d={fade:.6f},afade=t=out:st={max(0.0,seg_duration-fade):.6f}:d={fade:.6f}[ba{i}]",
         ])
         chain.append(f"[bv{i}][ba{i}]")
     fc.append(''.join(chain)+f"concat=n={count}:v=1:a=1[bodyv][bodya]")
 
-def run_ffmpeg(src, out, ass, clip):
+def run_ffmpeg(src, out, ass, clip, body_segments=None):
     source_offset=max(0,float(clip.get("source_offset",0)))
     duration=max(1,float(clip["end"])-float(clip["start"]))
     q=float(clip.get("intro_end_rel") or clip.get("question_end_rel") or 0)
@@ -171,31 +235,30 @@ def run_ffmpeg(src, out, ass, clip):
     base="fps=30,settb=AVTB,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
     fc=[];extra_inputs=[]
     if teaser or not qa:
-        segments,_,_=body_plan(clip)
+        segments=body_segments or body_plan(clip,src)[0]
         append_body_filters(fc,segments,base)
     if teaser:
         hs=float(clip["hook_start_rel"]); he=float(clip["hook_end_rel"]);q=he-hs
-        if not (0 <= hs < he <= duration+.02 and .7 < q <= 6): raise ValueError("Invalid teaser bounds")
+        if not (0 <= hs < he <= duration+.02 and MIN_HOOK_SECONDS <= q <= MAX_HOOK_SECONDS): raise ValueError("Invalid teaser bounds")
         extra_inputs=["-ss",str(source_offset+hs),"-t",str(q),"-i",str(src)]
         fc += [
             f"[1:v]setpts=PTS-STARTPTS,{base},hue=s=0,eq=contrast=1.06:brightness=-0.025,drawgrid=w=iw:h=6:t=1:c=black@0.12[hookv]",
             f"[1:a]asetpts=PTS-STARTPTS,aresample=48000,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,apad,atrim=duration={q:.6f}[hooka]",
             "[hookv][hooka][bodyv][bodya]concat=n=2:v=1:a=1[vbase][speech]",
-            f"anoisesrc=color=pink:amplitude=0.10:duration=0.24:sample_rate=48000,highpass=f=700,lowpass=f=6500,afade=t=in:d=0.10,afade=t=out:st=0.10:d=0.14,adelay={round((q-.12)*1000)}:all=1[whoosh]",
+            f"anoisesrc=color=white:amplitude=0.18:duration=0.28:sample_rate=48000,highpass=f=550,lowpass=f=7000,afade=t=in:d=0.025,afade=t=out:st=0.10:d=0.18,adelay={round((q-.16)*1000)}:all=1[whoosh]",
             "[speech][whoosh]amix=inputs=2:duration=first:normalize=0[abase]",
         ]
     elif qa:
-        transition=max(.18,min(.38,q-.25,duration-q-.25))
         base_with_pts="setpts=PTS-STARTPTS,"+base
         fc += [
             f"[0:v]{base_with_pts},split=2[vq0][vr0]",
             f"[vq0]trim=start=0:end={q:.3f},setpts=PTS-STARTPTS,hue=s=0,eq=contrast=1.06:brightness=-0.025[vq]",
-            f"[vr0]trim=start={q-transition:.3f},setpts=PTS-STARTPTS[vr]",
-            f"[vq][vr]xfade=transition=fade:duration={transition:.3f}:offset={q-transition:.3f}[vbase]",
+            f"[vr0]trim=start={q:.3f},setpts=PTS-STARTPTS[vr]",
+            f"[vq][vr]concat=n=2:v=1:a=0[vbase]",
             "[0:a]asetpts=PTS-STARTPTS,asplit=2[aq0][ar0]",
             f"[aq0]atrim=start=0:end={q:.3f},asetpts=PTS-STARTPTS,highpass=f=300,lowpass=f=3400,equalizer=f=1400:t=q:w=1:g=3,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,volume=1.05[aq]",
-            f"[ar0]atrim=start={q-transition:.3f},asetpts=PTS-STARTPTS[ar]",
-            f"[aq][ar]acrossfade=d={transition:.3f}:c1=tri:c2=tri[abase]",
+            f"[ar0]atrim=start={q:.3f},asetpts=PTS-STARTPTS[ar]",
+            f"[aq][ar]concat=n=2:v=0:a=1[abase]",
         ]
     else:
         fc += ["[bodyv]null[vbase]","[bodya]anull[abase]"]
@@ -217,10 +280,13 @@ def run_ffmpeg(src, out, ass, clip):
     ]
     subprocess.run(cmd,check=True)
 
-def caption_words(clip):
+def caption_words(clip, body_segments=None, mapped_body=None):
     teaser=clip.get("edit_style")=="teaser" and clip.get("qa",True)
     if not teaser and clip.get("qa",True): return clip.get("words",[])
-    _,body,_=body_plan(clip)
+    if mapped_body is None:
+        segments=body_segments or body_plan(clip)[0]
+        body=remap_words(clip.get("words",[]),segments,1,clip.get("remove_pauses",False))
+    else: body=mapped_body
     if not teaser: return body
     duration=float(clip["hook_end_rel"])-float(clip["hook_start_rel"])
     # Separate subtitle groups at the cut; the teaser must not borrow body words.
@@ -256,9 +322,12 @@ def main():
                         rr.raise_for_status()
                         for chunk in rr.iter_content(1024*1024):
                             if chunk: f.write(chunk)
-                ass=td/f"clip-{i:02d}.ass"; make_ass(caption_words(clip),ass)
+                segments,mapped_body,edited_duration=body_plan(clip,src)
+                removed=max(0.0,(float(clip["end"])-float(clip["start"]))-edited_duration)
+                print(f"Clip {index}: limpieza por ondas quitó {removed:.2f}s en {max(0,len(segments)-1)} microcorte(s).",file=sys.stderr)
+                ass=td/f"clip-{i:02d}.ass"; make_ass(caption_words(clip,segments,mapped_body),ass)
                 out=td/f"{jid}-output-{i:02d}.mp4"
-                run_ffmpeg(src,out,ass,clip)
+                run_ffmpeg(src,out,ass,clip,segments)
                 output_url=clip.get("output_upload_url")
                 if not output_url: raise RuntimeError(f"Falta el destino para clip {i}")
                 upload_signed_supabase(output_url,out)
