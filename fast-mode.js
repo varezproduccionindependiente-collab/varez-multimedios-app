@@ -2,7 +2,6 @@
   localStorage.removeItem('varez_multimedios_job_v22');
   localStorage.removeItem('varez_multimedios_job_v22_previous');
   const nativeFetch = window.fetch.bind(window);
-  let cachedSelection = null;
 
   function isGeminiGenerate(url){
     return typeof url === 'string' &&
@@ -39,15 +38,6 @@
     if(!isGeminiGenerate(rawUrl)) return nativeFetch(input, init);
 
     const url = rawUrl.replace(/models\/gemini-[^:]+:generateContent/, 'models/gemini-3.6-flash:generateContent');
-    const body = typeof init?.body === 'string' ? init.body : '';
-
-    if(body.includes('Actuá como jefe de edición') && cachedSelection){
-      return new Response(cachedSelection, {
-        status: 200,
-        headers: {'Content-Type':'application/json'}
-      });
-    }
-
     let response = await nativeFetch(url, {...init});
 
     if(response.status===429){
@@ -64,10 +54,6 @@
           {status:400,headers:{'Content-Type':'application/json'}}
         );
       }
-    }
-
-    if(response.ok && body.includes('Sos el editor senior de Varez Servicios para Multimedios')){
-      try{ cachedSelection = await response.clone().text(); }catch{}
     }
     return response;
   };
