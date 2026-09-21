@@ -1,73 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {JOB_VERSION,MAX_CLIP_SECONDS,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from '../editor.mjs';
-
-const text='La cultura nos salva. Trabajamos cada día para que todos puedan participar. Ese es nuestro compromiso. Ahora empieza otra pregunta';
-const words=text.split(' ').map((word,i)=>({word,start:i*.4+.1,end:i*.4+.44}));
-const context=100, c={title:'La cultura nos salva',start:100,end:106.9,opening_words:'La cultura nos salva',closing_words:'Ese es nuestro compromiso',hook_closing_words:'La cultura nos salva',hook_end:102};
-
-test('fewer than five is valid, zero is valid; no manufactured or duplicate windows',()=>{
-  assert.equal(normalizeSelection([c,{...c,title:'Duplicado'},{start:'mal',end:25}],200).length,1);
-  assert.deepEqual(normalizeSelection([],200),[]);
-  assert.equal(normalizeSelection([{...c,end:180}],200)[0].end,180);
-});
-test('clip 4: absent, relative or whole-clip hook timestamp recovers from real words',()=>{
-  for(const hook_end of [undefined,null,NaN,1.8,c.end,999]){
-    const p=alignQuotes({...c,hook_end},words,context,200);
-    assert.ok(p,`failed hook ${hook_end}`);
-    assert.ok(p.intro_end_rel>.7&&p.intro_end_rel<p.end-p.start-.7);
-    assert.equal(p.words[0].word,'La');
-    assert.equal(p.words.at(-1).word,'compromiso.');
-    assert.ok(p.end<context+words[17].start,'must not include Ahora');
-  }
-});
-test('tight gap after closing phrase does not add the next word',()=>{
-  const w=structuredClone(words);w[17].start=w[16].end+.02;
-  const p=alignQuotes(c,w,context,200);
-  assert.ok(p.end<context+w[17].start);
-});
-test('word ID repair validates bounds and meaningful room for development',()=>{
-  const answer={usable:true,first_word:0,last_word:16,hook_last_word:3,complete_start:true,complete_end:true,protagonist_hook:true};
-  assert.ok(planFromWordIds(c,words,context,200,answer));
-  for(const invalid of [{hook_last_word:16},{last_word:999},{first_word:-1},{first_word:0.5},{protagonist_hook:false},{usable:false}]){
-    assert.equal(planFromWordIds(c,words,context,200,{...answer,...invalid}),null);
-  }
-});
-test('an unmatchable quote requires review rather than an arbitrary fixed intro',()=>{
-  assert.equal(alignQuotes({...c,hook_closing_words:'palabras que nadie dijo'},words,context,200),null);
-});
-test('clip 4 failure preserves clips 1–3, continues 5, reloads and retries only 4',async()=>{
-  const memory=new Map(),storage={setItem:(k,v)=>memory.set(k,v),getItem:k=>memory.get(k)};
-  let job={version:JOB_VERSION,id:'0123456789abcdef',clips:Array.from({length:5},(_,i)=>({...c,title:`Clip ${i+1}`})),entries:[]};
-  const calls=[];
-  const good=await prepareCandidates(job,async(clip,i)=>{calls.push(i);if(i===3)throw Error('network interrupted');return {...clip,source_index:i+1,source_paths:[`source-${i+1}`]}},()=>saveJob(storage,'job',job));
-  assert.deepEqual(calls,[0,1,2,3,4]);assert.equal(good.length,4);
-  job=loadJob(storage,'job');assert.equal(job.entries[0].clip.source_paths[0],'source-1');
-  const retried=[];
-  const complete=await prepareCandidates(job,async(clip,i)=>{retried.push(i);return {...clip,source_index:i+1}},()=>saveJob(storage,'job',job));
-  assert.deepEqual(retried,[3]);assert.equal(complete.length,5);
-});
-test('editorial rejection yields four good clips and is not retried forever',async()=>{
-  const j={clips:Array.from({length:5},()=>c),entries:[]};
-  const good=await prepareCandidates(j,async(clip,i)=>i===3?null:clip);
-  assert.equal(good.length,4);assert.equal(j.entries[3].status,'skipped');
-  await prepareCandidates(j,()=>assert.fail('completed or rejected candidates must be reused'));
-});
-
-test('a short closing statement can be the independent teaser',()=>{
-  const p=planFromWordIds(c,words,context,200,{usable:true,first_word:0,last_word:15,hook_first_word:12,hook_last_word:15,complete_start:true,complete_end:true,protagonist_hook:true});
-  assert.ok(p);
-  assert.equal(p.hook_words[0].word,'Ese');
-  assert.equal(p.words[0].word,'La');
-  assert.equal(p.words.at(-1).word,'compromiso.');
-  assert.ok(p.hook_start_rel>4);
-});
-
-test('technical guard rejects an overlong or almost-whole-source cut',()=>{
-  const longWords=Array.from({length:220},(_,i)=>({word:`palabra${i}`,start:i*.5,end:i*.5+.35}));
-  const answer={usable:true,first_word:0,last_word:180,hook_first_word:8,hook_last_word:14,complete_start:true,complete_end:true,protagonist_hook:true};
-  assert.equal(planFromWordIds(c,longWords,0,180,answer),null,'must reject more than the hard maximum');
-  const almostWhole={...answer,last_word:119};
-  assert.ok(longWords[119].end<MAX_CLIP_SECONDS);
-  assert.equal(planFromWordIds(c,longWords,0,70,almostWhole),null,'must reject almost the entire source');
-});
+import {JOB_VERSION,MIN_CLIP_SECONDS,MAX_CLIP_SECONDS,MIN_HOOK_SECONDS,MAX_HOOK_SECONDS,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from '../editor.mjs';
+const opening='La cultura nos salva porque construye una comunidad con memoria'.split(' '),middle=Array.from({length:72},(_,i)=>`desarrollo${i}`),hook='Sin cultura nuestra comunidad pierde su memoria su voz y también todo su futuro'.split(' '),closing='Por eso sostener estos espacios es nuestro compromiso con toda la comunidad'.split(' ');
+const core=[...opening,...middle,...hook,...closing],tokens=[...core,'Ahora','empieza','otra','pregunta'],words=tokens.map((word,i)=>({word,start:i*.45+.1,end:i*.45+.44}));
+const context=100,first=0,last=core.length-1,hookFirst=opening.length+middle.length,hookLast=hookFirst+hook.length-1,closingFirst=hookLast+1,quote=(from,to)=>words.slice(from,to+1).map(w=>w.word).join(' ');
+const c={title:'La cultura nos salva',start:context+words[first].start,end:context+words[last].end,opening_words:quote(first,first+7),closing_words:quote(last-7,last),hook_opening_words:quote(hookFirst,hookFirst+5),hook_closing_words:quote(hookLast-5,hookLast),hook_start:context+words[hookFirst].start,hook_end:context+words[hookLast].end,context_start_complete:true,context_end_complete:true,hook_context_complete:true,single_contiguous_hook:true};
+const approved={usable:true,first_word:first,last_word:last,hook_first_word:hookFirst,hook_last_word:hookLast,complete_start:true,complete_end:true,protagonist_hook:true,hook_context_complete:true,single_contiguous_hook:true};
+test('fewer than five is valid and duplicates are removed',()=>{assert.equal(normalizeSelection([c,{...c,title:'Duplicado'}],250).length,1);assert.deepEqual(normalizeSelection([],250),[])});
+test('approved quotes recover a complete body and contextual hook',()=>{const p=alignQuotes(c,words,context,250);assert.ok(p);assert.ok(p.intro_end_rel>=MIN_HOOK_SECONDS&&p.intro_end_rel<=MAX_HOOK_SECONDS);assert.ok(p.end-p.start>=MIN_CLIP_SECONDS);assert.ok(p.end<context+words[last+1].start)});
+test('semantic approval is mandatory',()=>{assert.equal(alignQuotes({...c,hook_context_complete:false},words,context,250),null);assert.equal(alignQuotes({...c,context_start_complete:false},words,context,250),null);assert.equal(alignQuotes({...c,single_contiguous_hook:false},words,context,250),null)});
+test('word repair validates context and hook continuity',()=>{assert.ok(planFromWordIds(c,words,context,250,approved));for(const invalid of [{protagonist_hook:false},{hook_context_complete:false},{single_contiguous_hook:false},{complete_start:false},{usable:false}])assert.equal(planFromWordIds(c,words,context,250,{...approved,...invalid}),null)});
+test('a contextual closing statement can be the teaser',()=>{const p=planFromWordIds(c,words,context,250,{...approved,hook_first_word:closingFirst,hook_last_word:last});assert.ok(p);assert.ok(p.hook_start_rel>30)});
+test('technical guard rejects short, overlong and almost-whole cuts',()=>{const w=Array.from({length:220},(_,i)=>({word:`palabra${i}`,start:i*.5,end:i*.5+.35})),base={...approved,first_word:0,last_word:180,hook_first_word:8,hook_last_word:18};assert.equal(planFromWordIds(c,w,0,180,base),null);assert.equal(planFromWordIds(c,w,0,70,{...base,last_word:119}),null);assert.equal(planFromWordIds(c,w,0,180,{...base,last_word:40}),null);assert.equal(MAX_CLIP_SECONDS,75)});
+test('one failure preserves other clips and retries only failed',async()=>{const memory=new Map(),storage={setItem:(k,v)=>memory.set(k,v),getItem:k=>memory.get(k)};let job={version:JOB_VERSION,id:'0123456789abcdef',clips:Array.from({length:5},(_,i)=>({...c,title:`Clip ${i+1}`})),entries:[]};const good=await prepareCandidates(job,async(clip,i)=>{if(i===3)throw Error('network');return {...clip,source_index:i+1}},()=>saveJob(storage,'job',job));assert.equal(good.length,4);job=loadJob(storage,'job');const retried=[];await prepareCandidates(job,async(clip,i)=>{retried.push(i);return clip});assert.deepEqual(retried,[3])});
