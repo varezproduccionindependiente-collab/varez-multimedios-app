@@ -1,18 +1,18 @@
 {
   "clips": [
-    "FM_Ciudad_Clip_01_Vertigo_vs_Mareo",
-    "FM_Ciudad_Clip_02_Panico_vs_Vertigo",
-    "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado",
-    "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes",
-    "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia"
+    "FM_Ciudad_Vetes_Clip_01_Preparar_Consulta",
+    "FM_Ciudad_Vetes_Clip_02_Gatos_Transportadora",
+    "FM_Ciudad_Vetes_Clip_03_Refuerzo_Positivo",
+    "FM_Ciudad_Vetes_Clip_04_Adiestrador_vs_Etologo",
+    "FM_Ciudad_Vetes_Clip_05_Acercarse_Perro_Miedoso"
   ],
   "titles": {
-    "FM_Ciudad_Clip_01_Vertigo_vs_Mareo": "Vértigo vs. mareo",
-    "FM_Ciudad_Clip_02_Panico_vs_Vertigo": "Pánico vs. vértigo",
-    "FM_Ciudad_Clip_03_Auriculares_y_Oido_Embotado": "Auriculares y oído embotado",
-    "FM_Ciudad_Clip_04_Perdida_Auditiva_Jovenes": "Pérdida auditiva en jóvenes",
-    "FM_Ciudad_Clip_05_Hipoacusia_Subita_Urgencia": "Pérdida súbita de audición"
+    "FM_Ciudad_Vetes_Clip_01_Preparar_Consulta": "Cómo preparar a tu mascota para la consulta",
+    "FM_Ciudad_Vetes_Clip_02_Gatos_Transportadora": "Por qué los gatos deben ir en transportadora",
+    "FM_Ciudad_Vetes_Clip_03_Refuerzo_Positivo": "Refuerzo positivo para enseñar",
+    "FM_Ciudad_Vetes_Clip_04_Adiestrador_vs_Etologo": "Adiestrador vs. etólogo",
+    "FM_Ciudad_Vetes_Clip_05_Acercarse_Perro_Miedoso": "Cómo acercarse a un perro miedoso"
   },
   "quality": "540x960-fast",
-  "nonce": 1789850302
+  "nonce": 1790014831
 }
