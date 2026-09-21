@@ -32,10 +32,12 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          python -m pip install --upgrade requests
-      - name: Render five clips
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          python -c "import requests" 2>/dev/null || python -m pip install requests
+      - name: Render selected clips
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

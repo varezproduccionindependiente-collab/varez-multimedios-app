@@ -1,5 +1,7 @@
 // Editorial decisions stay in the model; timing and job recovery are deterministic.
-export const JOB_VERSION = 22;
+export const JOB_VERSION = 32;
+export const MAX_CLIP_SECONDS = 75;
+export const MAX_SOURCE_SHARE = .82;
 export const normalizeToken = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 export function cleanWords(words) {
@@ -52,10 +54,14 @@ function rangePlan(c, words, contextStart, total, first, last, hookLast, require
   if (![first,last].every(Number.isInteger) || first<0 || last>=words.length || first>=last) return null;
   if (requireHook && (!Number.isInteger(hookLast) || hookLast<hookFirst || hookLast>last || !Number.isInteger(hookFirst) || hookFirst<first)) return null;
   const start=contextStart+beforeWord(words,first), end=Math.min(total,contextStart+afterWord(words,last));
+  const bodyDuration=end-start;
   const hs=requireHook && Number.isInteger(hookFirst) ? beforeWord(words,hookFirst) : 0;
   const he=requireHook && Number.isInteger(hookLast) ? afterWord(words,hookLast) : 0;
   const intro=requireHook ? he-hs : 0;
-  if (end-start<2 || (requireHook && (intro<=.7 || intro>6 || intro>=end-start-.7))) return null;
+  // The model may suggest a whole interview even when the prompt asks for a reel.
+  // Reject it here so the word-level repair pass has to choose one complete idea.
+  if (bodyDuration<2 || bodyDuration>MAX_CLIP_SECONDS+.05 || (total>45 && bodyDuration/total>MAX_SOURCE_SHARE)) return null;
+  if (requireHook && (intro<=.7 || intro>6 || intro>=bodyDuration-.7)) return null;
   return {...c,start,end,edit_style:"teaser",hook_start_rel:hs+contextStart-start,hook_end_rel:he+contextStart-start,hook_words:requireHook ? words.slice(hookFirst,hookLast+1).map(w=>({...w,start:w.start-hs,end:w.end-hs})) : [],hook_end:contextStart+(words[hookLast]?.end || 0),intro_end_rel:intro,
     opening_words:words.slice(first,Math.min(first+10,last+1)).map(w=>w.word).join(' '),
     closing_words:words.slice(Math.max(first,last-9),last+1).map(w=>w.word).join(' '),

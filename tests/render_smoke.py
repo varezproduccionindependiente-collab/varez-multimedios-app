@@ -63,6 +63,19 @@ with tempfile.TemporaryDirectory(prefix='varez-render-') as temp:
     assert frequency_ratio(out,1)<frequency_ratio(out,4)*.5
     print('PASS: ending teaser prepended, 10s total, hard color cut, phone audio, repeated captions')
 
+    jumpcut={**teaser,'remove_pauses':True}
+    segments,mapped,edited=render.body_plan(jumpcut)
+    assert len(segments)==2 and 3.9<edited<4.2,(segments,edited)
+    assert mapped[1]['start']<1.3,mapped
+    timeline=render.caption_words(jumpcut)
+    assert timeline[1]['start']==3.1 and timeline[2]['start']<4.3,timeline
+    render.make_ass(timeline,ass)
+    render.run_ffmpeg(src,out,ass,jumpcut)
+    probe=json.loads(cmd('ffprobe','-v','error','-show_entries','format=duration','-of','json',str(out)))
+    assert abs(float(probe['format']['duration'])-(edited+3))<.12,(probe,edited)
+    assert colorfulness(out,2.9)<3 and colorfulness(out,3.05)>20
+    print('PASS: teaser + 3.1s pause becomes teaser + natural 0.14s micro-pause; captions stay synchronized')
+
     manifest={'render_id':'fixture-attempt-2','clips':[
       {'source_index':i,'source_parts':['broken' if i==2 else 'good'],'start':0,'end':7,'output_path':f'output-{i}.mp4','output_upload_url':f'upload-{i}'} for i in [1,2,3]]}
     class Response:
@@ -79,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='varez-render-') as temp:
     render.upload_asset=lambda rid,path,name,ctype:done.append((name,json.loads(path.read_text())))
     sys.argv=['render.py','--release-id','1','--job-id','fixture','--manifest-url','manifest']
     render.main()
-    assert published==['upload-1','upload-3'],published
+    assert sorted(published)==['upload-1','upload-3'],published
     assert done[0][0]=='fixture-attempt-2-done.json'
     assert done[0][1]['outputs']==['output-1.mp4','output-3.mp4']
     assert done[0][1]['errors'][0]['source_index']==2

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {JOB_VERSION,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from '../editor.mjs';
+import {JOB_VERSION,MAX_CLIP_SECONDS,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from '../editor.mjs';
 
 const text='La cultura nos salva. Trabajamos cada día para que todos puedan participar. Ese es nuestro compromiso. Ahora empieza otra pregunta';
 const words=text.split(' ').map((word,i)=>({word,start:i*.4+.1,end:i*.4+.44}));
@@ -61,4 +61,13 @@ test('a short closing statement can be the independent teaser',()=>{
   assert.equal(p.words[0].word,'La');
   assert.equal(p.words.at(-1).word,'compromiso.');
   assert.ok(p.hook_start_rel>4);
+});
+
+test('technical guard rejects an overlong or almost-whole-source cut',()=>{
+  const longWords=Array.from({length:220},(_,i)=>({word:`palabra${i}`,start:i*.5,end:i*.5+.35}));
+  const answer={usable:true,first_word:0,last_word:180,hook_first_word:8,hook_last_word:14,complete_start:true,complete_end:true,protagonist_hook:true};
+  assert.equal(planFromWordIds(c,longWords,0,180,answer),null,'must reject more than the hard maximum');
+  const almostWhole={...answer,last_word:119};
+  assert.ok(longWords[119].end<MAX_CLIP_SECONDS);
+  assert.equal(planFromWordIds(c,longWords,0,70,almostWhole),null,'must reject almost the entire source');
 });

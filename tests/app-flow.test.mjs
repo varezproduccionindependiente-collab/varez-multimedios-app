@@ -6,13 +6,14 @@ import {webcrypto} from 'node:crypto';
 import * as editorial from '../editor.mjs';
 
 // Exercise the actual app entrypoint. Only external services/media extraction are fixtures.
-async function runScenario(count,rejectFourth=false,interruptFourth=false){
+async function runScenario(count,rejectFourth=false,interruptFourth=false,batchFast=false){
   const nodes=new Map();
   function element(){return {style:{},dataset:{},value:'',textContent:'',hidden:true,children:[],classList:{add(){},remove(){},toggle(){},contains(){return true}},addEventListener(){},appendChild(el){this.children.push(el)}}}
   const document={querySelector(selector){if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector)},querySelectorAll(){return []},createElement:element};
   const memory=new Map([['varez_gemini_key','fixture'],['varez_groq_key','fixture'],['varez_github_pat','fixture']]);
   const storage={getItem:k=>memory.get(k)||null,setItem:(k,v)=>memory.set(k,v)};
   const words='La cultura nos salva. Trabajamos cada día para que todos puedan participar. Ese es nuestro compromiso. Ahora empieza otra pregunta'.split(' ').map((word,i)=>({word,start:i*.4+4.1,end:i*.4+4.44}));
+  const batchWords=Array.from({length:count},(_,clipIndex)=>words.map(word=>({...word,start:word.start+clipIndex*15.7,end:word.end+clipIndex*15.7}))).flat();
   const clips=Array.from({length:count},(_,i)=>({title:`Clip ${i+1}`,start:5+i*20,end:11.9+i*20,hook_end:6.7+i*20,hook_closing_words:i===3&&rejectFourth?'cita ausente':'La cultura nos salva',opening_words:'La cultura nos salva',closing_words:'Ese es nuestro compromiso',question_start:-1,question_end:-1,reason:'Idea completa',boundary_check:'Inicio y cierre completos'}));
   let manifests=[],outputs=[],dispatches=0,repairs=0,transcriptions=0;
   const json=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
@@ -25,7 +26,7 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false){
       if(repair)repairs++;
       return json({candidates:[{content:{parts:[{text:JSON.stringify(repair?{usable:false}:{clips})}]}}]});
     }
-    if(url.includes('api.groq.com')){transcriptions++;if(interruptFourth&&transcriptions===4)return new Response('fixture failure',{status:401});return json({words})}
+    if(url.includes('api.groq.com')){transcriptions++;if(interruptFourth&&transcriptions===4)return new Response('fixture failure',{status:401});return json({words:batchFast?batchWords:words})}
     if(url.includes('/releases?'))return json([{id:7,tag_name:'varez-worker-storage'}]);
     if(url.includes('/dispatches')){
       dispatches++;
@@ -48,7 +49,7 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false){
   await vm.runInContext('runJob()',context);
   const result=JSON.parse(JSON.stringify(vm.runInContext('S.job',context)));
   assert.equal(result.phase,'done');assert.equal(result.outputPaths.length,count-(rejectFourth||interruptFourth?1:0));
-  assert.equal(dispatches,count?1:0);assert.equal(transcriptions,count);
+  assert.equal(dispatches,count?1:0);assert.equal(transcriptions,batchFast&&count?1:count);
   if(rejectFourth){assert.equal(result.entries[3].status,'skipped');assert.ok(result.outputPaths.some(p=>p.endsWith('output-05.mp4')));assert.equal(repairs,1)}
   if(interruptFourth){
     assert.equal(result.entries[3].status,'error');
@@ -65,12 +66,13 @@ async function runScenario(count,rejectFourth=false,interruptFourth=false){
   }else{
     await vm.runInContext('runJob()',context);
     assert.equal(dispatches,count?1:0,'reopening results must not repeat render');
-    assert.equal(transcriptions,count,'reopening results must reuse transcripts');
+    assert.equal(transcriptions,batchFast&&count?1:count,'reopening results must reuse transcripts');
   }
-  assert.equal(JSON.parse(memory.get('varez_multimedios_job_v22')).phase,'done');
+  assert.equal(JSON.parse(memory.get('varez_multimedios_job_v32')).phase,'done');
   return result;
 }
 test('actual app delivers two clips with two outputs; does not wait for five',()=>runScenario(2));
 test('actual app reviews rejected fourth clip and delivers 1, 2, 3, 5',()=>runScenario(5,true));
 test('actual app reload restores the job and retries only failed clip 4',()=>runScenario(5,false,true));
+test('actual app transcribes five selected ranges in one batch',()=>runScenario(5,false,false,true));
 test('no usable material finishes without dispatching a render',()=>runScenario(0));
