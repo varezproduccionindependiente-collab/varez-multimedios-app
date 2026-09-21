@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import {JOB_VERSION,MIN_CLIP_SECONDS,MAX_CLIP_SECONDS,MAX_SOURCE_SHARE,MIN_HOOK_SECONDS,MAX_HOOK_SECONDS,cleanWords,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from './editor.mjs?v=33';
+import {JOB_VERSION,MIN_CLIP_SECONDS,MAX_CLIP_SECONDS,MAX_SOURCE_SHARE,MIN_HOOK_SECONDS,MAX_HOOK_SECONDS,cleanWords,normalizeSelection,alignQuotes,planFromWordIds,prepareCandidates,saveJob,loadJob} from './editor.mjs?v=34';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const OWNER='varezproduccionindependiente-collab', REPO='varez-multimedios-app', WORKFLOW='render-multimedios.yml';
 const CLOUD='https://fggygohsaoxlscgefshm.supabase.co/functions/v1/varez-cloud', BUCKET='varez-multimedios-cloud';
@@ -18,6 +18,7 @@ function resetProgressUI(hide=true){S.progress=0;$('#ppct').textContent='0%';$('
 function fail(msg){$('#log').textContent=msg;$('#log').className='log error';throw new Error(msg)}
 function cfg(){return{gemini:localStorage.getItem(LS.gemini)||'',groq:localStorage.getItem(LS.groq)||'',github:localStorage.getItem(LS.github)||''}}
 const JOB_KEY='varez_multimedios_job_v33';
+const GEMINI_MODELS=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite'];
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function request(url,options={},timeout=120000){
   for(let attempt=0;attempt<3;attempt++){
@@ -143,7 +144,7 @@ PRECISIÓN: opening_words debe copiar literalmente las primeras 5 a 12 palabras 
       }
     }
   };
-  const models=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite'];
+  const models=GEMINI_MODELS;
   let lastErr='', hadValidResponse=false;
   const normalizeClip=(c,i)=>{
     const st=Number(c.start), en=Number(c.end);
@@ -218,22 +219,28 @@ PRECISIÓN: opening_words debe copiar literalmente las primeras 5 a 12 palabras 
         {text:reviewPrompt},
         {file_data:{mime_type:fileInfo.mimeType||S.file.type||'video/mp4',file_uri:fileInfo.uri}}
       ]}];
-      try{
-        const rr=await request(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
-          method:'POST',
-          headers:{'x-goog-api-key':cfg().gemini,'Content-Type':'application/json'},
-          body:JSON.stringify(reviewBody)
-        });
-        if(!rr.ok)throw new Error('La revisión editorial respondió '+rr.status+'.');
-        const rd=await rr.json();
-        const rtxt=(rd.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');
-        const reviewed=JSON.parse(rtxt);
-        if(!Array.isArray(reviewed.clips)||reviewed.clips.length>5)throw new Error('La revisión editorial devolvió un formato inválido.');
-        out=reviewed;
-      }catch(e){
-        throw new Error('No se pudo completar el control editorial. No voy a entregar recortes sin revisar: '+String(e?.message||e));
+      let reviewModel='',reviewError='';
+      const reviewModels=[model,...models.filter(candidate=>candidate!==model)];
+      for(const candidate of reviewModels){
+        try{
+          progress(27,'Revisión editorial final…',candidate===model?'Comprobando contexto, gancho y cierre.':'El modelo anterior está ocupado; revisando con '+candidate.replace('gemini-','')+'…');
+          const rr=await request(`https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent`,{
+            method:'POST',headers:{'x-goog-api-key':cfg().gemini,'Content-Type':'application/json'},body:JSON.stringify(reviewBody)
+          });
+          if(!rr.ok){
+            const raw=await rr.text();reviewError=`${rr.status} ${raw.slice(0,300)}`;
+            if([404,429,500,502,503,504].includes(rr.status))continue;
+            throw new Error(reviewError);
+          }
+          const rd=await rr.json();
+          const rtxt=(rd.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');
+          const reviewed=JSON.parse(rtxt);
+          if(!Array.isArray(reviewed.clips)||reviewed.clips.length>5)throw new Error('formato inválido');
+          out=reviewed;reviewModel=candidate;break;
+        }catch(e){reviewError=String(e?.message||e)}
       }
-      return normalizeSelection(out.clips,total).map((c,i)=>normalizeClip({...c,selected_model:model},i));
+      if(!reviewModel)throw new Error('No se pudo completar el control editorial con ningún modelo. El avance quedó guardado. Último detalle: '+reviewError);
+      return normalizeSelection(out.clips,total).map((c,i)=>normalizeClip({...c,selected_model:reviewModel},i));
     }
   }
   throw new Error(hadValidResponse
