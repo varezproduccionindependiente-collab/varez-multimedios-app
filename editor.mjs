@@ -1,7 +1,10 @@
 // Editorial decisions stay in the model; timing and job recovery are deterministic.
-export const JOB_VERSION = 32;
+export const JOB_VERSION = 33;
+export const MIN_CLIP_SECONDS = 30;
 export const MAX_CLIP_SECONDS = 75;
 export const MAX_SOURCE_SHARE = .82;
+export const MIN_HOOK_SECONDS = 4.5;
+export const MAX_HOOK_SECONDS = 9.5;
 export const normalizeToken = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 export function cleanWords(words) {
@@ -60,8 +63,8 @@ function rangePlan(c, words, contextStart, total, first, last, hookLast, require
   const intro=requireHook ? he-hs : 0;
   // The model may suggest a whole interview even when the prompt asks for a reel.
   // Reject it here so the word-level repair pass has to choose one complete idea.
-  if (bodyDuration<2 || bodyDuration>MAX_CLIP_SECONDS+.05 || (total>45 && bodyDuration/total>MAX_SOURCE_SHARE)) return null;
-  if (requireHook && (intro<=.7 || intro>6 || intro>=bodyDuration-.7)) return null;
+  if (bodyDuration<MIN_CLIP_SECONDS || bodyDuration>MAX_CLIP_SECONDS+.05 || (total>45 && bodyDuration/total>MAX_SOURCE_SHARE)) return null;
+  if (requireHook && (intro<MIN_HOOK_SECONDS || intro>MAX_HOOK_SECONDS || intro>=bodyDuration-.7)) return null;
   return {...c,start,end,edit_style:"teaser",hook_start_rel:hs+contextStart-start,hook_end_rel:he+contextStart-start,hook_words:requireHook ? words.slice(hookFirst,hookLast+1).map(w=>({...w,start:w.start-hs,end:w.end-hs})) : [],hook_end:contextStart+(words[hookLast]?.end || 0),intro_end_rel:intro,
     opening_words:words.slice(first,Math.min(first+10,last+1)).map(w=>w.word).join(' '),
     closing_words:words.slice(Math.max(first,last-9),last+1).map(w=>w.word).join(' '),
@@ -69,6 +72,8 @@ function rangePlan(c, words, contextStart, total, first, last, hookLast, require
 }
 
 export function alignQuotes(c, words, contextStart, total, requireHook=true) {
+  if (c.context_start_complete!==true || c.context_end_complete!==true) return null;
+  if (requireHook && (c.hook_context_complete!==true || c.single_contiguous_hook!==true)) return null;
   const first=findQuote(words,c.opening_words,c.start-contextStart,'start');
   const last=findQuote(words,c.closing_words,c.end-contextStart);
   // A correct quote fixes an absolute/relative hook timestamp mixup as well as a missing timestamp.
@@ -82,7 +87,8 @@ export function alignQuotes(c, words, contextStart, total, requireHook=true) {
 export function planFromWordIds(c, words, contextStart, total, answer, requireHook=true) {
   if (answer?.usable!==true) return null;
   const first=answer.first_word, last=answer.last_word, hook=answer.hook_last_word;
-  if (answer.complete_start!==true || answer.complete_end!==true || (requireHook && answer.protagonist_hook!==true)) return null;
+  if (answer.complete_start!==true || answer.complete_end!==true ||
+      (requireHook && (answer.protagonist_hook!==true || answer.hook_context_complete!==true || answer.single_contiguous_hook!==true))) return null;
   return rangePlan(c,words,contextStart,total,first,last,hook,requireHook,answer.hook_first_word ?? first);
 }
 
