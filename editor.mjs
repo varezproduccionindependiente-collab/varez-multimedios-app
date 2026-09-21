@@ -1,5 +1,5 @@
 // Editorial decisions stay in the model; timing and job recovery are deterministic.
-export const JOB_VERSION = 33;
+export const JOB_VERSION = 34;
 export const MIN_CLIP_SECONDS = 30;
 export const MAX_CLIP_SECONDS = 75;
 export const MAX_SOURCE_SHARE = .82;
