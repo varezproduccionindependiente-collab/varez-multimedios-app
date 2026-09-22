@@ -1,0 +1,28 @@
+name: Empaquetar Gestor Informes Gratis
+
+on:
+  push:
+    branches:
+      - gestor-informes-fm-ciudad
+    paths:
+      - "free_local/**"
+      - ".github/workflows/package-free-local.yml"
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crear paquete
+        run: |
+          cd free_local
+          zip -r ../Gestor_Informes_FM_Ciudad_GRATIS.zip . -x "*.pyc" "__pycache__/*" ".venv/*"
+
+      - name: Subir paquete
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gestor_Informes_FM_Ciudad_GRATIS
+          path: Gestor_Informes_FM_Ciudad_GRATIS.zip
+          retention-days: 30
