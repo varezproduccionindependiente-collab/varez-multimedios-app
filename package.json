@@ -1,0 +1,10 @@
+{
+  "name": "gestor-informes-fm-ciudad",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "docx": "^9.5.1"
+  }
+}
