@@ -1,0 +1,32 @@
+GESTOR DE INFORMES FM CIUDAD - VERSION GRATIS
+
+QUE HACE
+- Subis un audio y una foto por cada informe.
+- Crea automaticamente una carpeta DD-MM-AAAA.
+- Transcribe el audio localmente con Whisper.
+- Genera titulo, resumen breve y resumen ampliado con Ollama local.
+- Renombra audio y foto como "Informe 01 - Titulo".
+- Genera un Word y un TXT con el resumen de todos los informes.
+- Si elegis una carpeta sincronizada por Google Drive para escritorio, todo se sube a Drive automaticamente.
+
+NO USA OPENAI API.
+NO REQUIERE SALDO NI PAGO POR INFORME.
+
+PRIMERA VEZ
+1. Ejecuta INSTALAR_PRIMERA_VEZ.bat.
+2. Despues ejecuta ABRIR_APP.bat.
+3. En la app toca "Elegir carpeta de Drive" y selecciona la carpeta raiz sincronizada.
+4. Agrega audio + foto y toca "Procesar y guardar todo".
+
+DESDE EL IPHONE
+La app muestra una direccion WiFi (por ejemplo http://192.168.1.50:8765).
+Con el iPhone conectado a la misma red WiFi, abri esa direccion en Safari.
+La PC debe permanecer encendida porque ella hace la transcripcion y el resumen.
+
+MODELOS
+- Whisper small: recomendado por equilibrio entre velocidad y precision.
+- Ollama qwen2.5:3b: recomendado para titulos y resumenes en español.
+- Si Ollama no esta disponible, la app usa un resumen de respaldo para no perder el lote.
+
+IMPORTANTE
+En el primer informe, Whisper puede tardar un poco mas porque descarga el modelo gratuito.
