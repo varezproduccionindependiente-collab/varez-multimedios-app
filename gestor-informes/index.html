@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · procesamiento gratis en tu dispositivo</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · procesamiento gratis en tu dispositivo · v10</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -134,19 +134,19 @@ function progress(v){$("progress").classList.add("show");$("bar").style.width=Ma
 async function getTranscriber(){
  const model="onnx-community/whisper-tiny";
  if(transcriber&&transcriberModel===model)return transcriber;
- log("Cargando Whisper gratuito en el navegador…");
- const opts={progress_callback:p=>{
-   if(p?.status==="progress"&&Number.isFinite(p.progress)) progress(Math.max(3,Math.min(18,p.progress*0.18)));
- }};
- if(navigator.gpu) opts.device="webgpu";
- try{
-   transcriber=await pipeline("automatic-speech-recognition",model,opts);
- }catch(e){
-   delete opts.device;
-   transcriber=await pipeline("automatic-speech-recognition",model,opts);
- }
+ log("Cargando Whisper gratuito en modo compatible para iPhone…");
+ const opts={
+   device:"wasm",
+   dtype:"q8",
+   progress_callback:p=>{
+     if(p?.status==="progress"&&Number.isFinite(p.progress)) {
+       progress(Math.max(3,Math.min(18,p.progress*0.18)));
+     }
+   }
+ };
+ transcriber=await pipeline("automatic-speech-recognition",model,opts);
  transcriberModel=model;
- log("Whisper listo.");
+ log("Whisper listo en modo WASM.");
  return transcriber;
 }
 
