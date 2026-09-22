@@ -26,7 +26,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini 3.6 · v17 · WhatsApp directo</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini 3.6 · v17.1 · WhatsApp directo</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -277,7 +277,7 @@ function inboxStatusHTML(items){
  return items.map(x=>{
    const n=x.drive_number||x.report_number||"?";
    const done=x.status==="done";
-   return '<div class="report" style="margin-top:8px"><div class="reporthead" style="margin:0"><div><b>Informe '+String(n).padStart(2,"0")+'</b><div class="tiny" style="margin-top:3px">'+esc(x.title||"Procesado")+'</div></div><span class="state">'+(done?"✓ En Drive":"Listo para pasar a Drive")+'</span></div></div>';
+   return '<div class="report" style="margin-top:8px"><div class="reporthead" style="margin:0"><div><b>Informe '+String(n).padStart(2,"0")+'</b><div class="tiny" style="margin-top:3px">'+esc(x.title||(done?"Procesado":"Pendiente de análisis"))+'</div></div><span class="state">'+(done?"✓ En Drive":"Listo para pasar a Drive")+'</span></div></div>';
  }).join("");
 }
 
@@ -348,7 +348,15 @@ async function markInboxComplete(item,number){
  await inboxFetch("complete",{
    method:"POST",
    headers:{"Content-Type":"application/json"},
-   body:JSON.stringify({id:item.id,drive_title:item.title,drive_number:number})
+   body:JSON.stringify({
+     id:item.id,
+     drive_title:item.title,
+     drive_number:number,
+     title:item.title,
+     short_summary:item.short_summary,
+     expanded_summary:item.expanded_summary,
+     transcript_excerpt:item.transcript_excerpt
+   })
  });
  item.status="done";item.drive_number=number;
 }
@@ -386,8 +394,15 @@ $("syncInbox").onclick=async()=>{
        number=next;used.add(number);next++;
      }
      const n=String(number).padStart(2,"0");
-     log("Subiendo recibido de WhatsApp como Informe "+n+" · "+item.title);
      const [audioBlob,photoBlob]=await Promise.all([blobFromURL(item.audio_url),blobFromURL(item.photo_url)]);
+     log("Analizando Informe "+n+" recibido desde WhatsApp…");
+     const audioFile=new File([audioBlob],item.audio_name||("Informe "+n+".m4a"),{type:item.audio_mime||audioBlob.type||"audio/mp4"});
+     const analysis=await editorialFromAudio(audioFile);
+     item.title=analysis.title;
+     item.short_summary=analysis.short_summary;
+     item.expanded_summary=analysis.expanded_summary;
+     item.transcript_excerpt=analysis.transcript||"";
+     log("Subiendo Informe "+n+" · "+item.title);
      await removePreviousGenerated(folder.id,number);
      const audioName="Informe "+n+" - "+safeTitle(item.title)+"."+fileExt(item.audio_name,"m4a");
      const photoName="Informe "+n+" - "+safeTitle(item.title)+"."+fileExt(item.photo_name,"jpg");
