@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gestor de Informes FM Ciudad · Gratis</title>
+<style>
+:root{--bg:#080b12;--panel:#111722;--line:#29344a;--text:#f6f8fb;--muted:#95a4ba;--green:#45d696;--blue:#72aaff;--red:#ff6f82}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 30% -10%,#1d2941,#080b12 45%);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}.wrap{max-width:920px;margin:auto;padding:20px 14px 70px}.head{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:18px}.head h1{margin:0;font-size:clamp(23px,5vw,34px)}.head p{margin:5px 0 0;color:var(--muted)}.badge{border:1px solid var(--line);background:#0e1522;border-radius:999px;padding:9px 12px;font-size:12px;white-space:nowrap}.badge.ok{color:#bfffe2;border-color:#256b51}.card{background:linear-gradient(180deg,#121a28,#0e141f);border:1px solid var(--line);border-radius:18px;padding:17px;margin-bottom:14px;box-shadow:0 18px 40px #0005}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:200px}.label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em;margin:0 0 6px}.input{width:100%;background:#0a1019;color:white;border:1px solid var(--line);border-radius:11px;padding:12px;outline:none}.btn{border:0;border-radius:11px;padding:11px 14px;font-weight:800;cursor:pointer;background:#222c3e;color:white}.btn.primary{background:var(--green);color:#062219}.btn.blue{background:var(--blue);color:#071424}.btn.red{background:#371722;color:#ff9baa}.btn:disabled{opacity:.45;cursor:not-allowed}.report{border:1px solid var(--line);background:#0a1019;border-radius:14px;padding:14px;margin-top:12px}.reporthead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:11px}.n{font-size:21px;font-weight:900}.state{font-size:12px;color:var(--muted)}.files{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pick{position:relative;min-height:82px;border:1px dashed #3b4962;border-radius:12px;padding:13px;background:#101724;display:flex;flex-direction:column;justify-content:center}.pick input{position:absolute;inset:0;opacity:0;cursor:pointer}.pick strong{font-size:13px}.pick span{font-size:12px;color:var(--muted);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}.stat{border:1px solid var(--line);border-radius:11px;background:#0a1019;padding:11px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--muted)}.progress{height:9px;background:#080d15;border:1px solid var(--line);border-radius:20px;overflow:hidden;margin-top:14px;display:none}.progress.show{display:block}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--green));transition:width .25s}.log{display:none;margin-top:12px;white-space:pre-wrap;background:#070c13;border:1px solid var(--line);border-radius:11px;padding:12px;color:#cbd6e6;font-size:12px;max-height:230px;overflow:auto}.log.show{display:block}.tiny{font-size:12px;color:var(--muted);line-height:1.45;margin-top:8px}.dest{margin-top:10px;padding:11px;border-radius:11px;background:#0a1019;border:1px solid var(--line);font-size:12px;color:#c7d3e5;word-break:break-all}.modal{display:none;position:fixed;inset:0;background:#000b;z-index:20;align-items:center;justify-content:center;padding:16px}.modal.show{display:flex}.modalbox{width:min(560px,100%);background:#111722;border:1px solid var(--line);border-radius:17px;padding:18px}.modalbox h2{margin:0 0 7px}.modalbox p{font-size:13px;color:var(--muted);line-height:1.5}.success{border-color:#247151!important}.error{border-color:#73303d!important}
+@media(max-width:650px){.head{align-items:flex-start;flex-direction:column}.files,.stats{grid-template-columns:1fr}.wrap{padding-top:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Versión local · sin pagar API</p></div>
+    <div id="modeBadge" class="badge">Comprobando PC…</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="grow">
+        <label class="label">Fecha del lote</label>
+        <input id="date" class="input" type="date">
+      </div>
+      <button id="folderBtn" class="btn blue">Elegir carpeta de Drive</button>
+      <button id="settingsBtn" class="btn">Ajustes</button>
+    </div>
+    <div id="destination" class="dest">Todavía no elegiste la carpeta raíz.</div>
+    <div class="tiny">Elegí una carpeta que Google Drive para escritorio sincronice. Desde ahí la app crea automáticamente una subcarpeta por día: <b>DD-MM-AAAA</b>.</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><b style="font-size:19px">Informes de hoy</b><div class="tiny">Cada bloque necesita su audio y su foto.</div></div>
+      <button id="add" class="btn">+ Agregar informe</button>
+    </div>
+    <div id="reports"></div>
+  </div>
+
+  <div class="card">
+    <b>Procesamiento automático</b>
+    <div class="stats">
+      <div class="stat"><b id="total">1</b><span>informes</span></div>
+      <div class="stat"><b id="ready">0</b><span>listos para procesar</span></div>
+      <div class="stat"><b>Word + TXT</b><span>se crean al terminar</span></div>
+    </div>
+    <div id="progress" class="progress"><div id="bar" class="bar"></div></div>
+    <div id="log" class="log"></div>
+    <button id="process" class="btn primary" style="width:100%;margin-top:14px;padding:14px">Procesar y guardar todo</button>
+  </div>
+
+  <div class="card">
+    <b>Desde el celular</b>
+    <div class="tiny">Si el iPhone está conectado a la misma Wi‑Fi que la PC, podés abrir esta misma app desde:</div>
+    <div id="lan" class="dest">Cargando dirección…</div>
+  </div>
+</div>
+
+<div id="settings" class="modal">
+  <div class="modalbox">
+    <h2>Ajustes locales</h2>
+    <p>No hay ninguna API paga. Whisper transcribe en esta PC. Ollama redacta título y resumen en esta PC.</p>
+    <label class="label">Carpeta raíz sincronizada con Drive</label>
+    <input id="rootInput" class="input" placeholder="Ej: G:\Mi unidad\Prueba IA Chana">
+    <label class="label" style="margin-top:12px">Modelo Whisper</label>
+    <select id="whisper" class="input"><option value="base">base · más rápido</option><option value="small">small · recomendado</option><option value="medium">medium · mejor precisión, más lento</option></select>
+    <label class="label" style="margin-top:12px">Modelo Ollama</label>
+    <input id="ollama" class="input" value="qwen2.5:3b">
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button id="cancel" class="btn">Cancelar</button><button id="save" class="btn primary">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let reports=[{audio:null,photo:null}],status={};
+
+function today(){
+ const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Argentina/Buenos_Aires",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+ const x=Object.fromEntries(parts.map(p=>[p.type,p.value])); return x.year+"-"+x.month+"-"+x.day;
+}
+$("date").value=today();
+function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]))}
+function render(){
+ $("reports").innerHTML="";
+ reports.forEach((r,i)=>{
+  const box=document.createElement("div"); box.className="report";
+  box.innerHTML=`
+   <div class="reporthead"><div><span class="n">${String(i+1).padStart(2,"0")}</span> <b>Informe ${i+1}</b></div>
+   <div class="row"><span class="state">${r.audio&&r.photo?"Listo":"Faltan archivos"}</span>${reports.length>1?'<button class="btn red remove">Eliminar</button>':""}</div></div>
+   <div class="files">
+    <label class="pick"><strong>🎙️ Elegir audio</strong><span>${r.audio?esc(r.audio.name):"MP3, WAV, M4A, AAC, OGG…"}</span><input class="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"></label>
+    <label class="pick"><strong>🖼️ Elegir foto</strong><span>${r.photo?esc(r.photo.name):"JPG, PNG, WebP, HEIC…"}</span><input class="photo" type="file" accept="image/*,.heic,.heif"></label>
+   </div>`;
+  box.querySelector(".audio").onchange=e=>{reports[i].audio=e.target.files[0]||null;render()};
+  box.querySelector(".photo").onchange=e=>{reports[i].photo=e.target.files[0]||null;render()};
+  const rm=box.querySelector(".remove"); if(rm)rm.onclick=()=>{reports.splice(i,1);render()};
+  $("reports").appendChild(box);
+ });
+ $("total").textContent=reports.length; $("ready").textContent=reports.filter(r=>r.audio&&r.photo).length;
+}
+render();
+$("add").onclick=()=>{reports.push({audio:null,photo:null});render()};
+
+async function refresh(){
+ const r=await fetch("/api/status"); status=await r.json();
+ $("destination").textContent=status.drive_root?status.drive_root:"Todavía no elegiste la carpeta raíz.";
+ $("lan").textContent=status.lan_url||"No disponible";
+ $("rootInput").value=status.drive_root||"";
+ $("whisper").value=status.whisper_model||"small";
+ $("ollama").value=status.ollama_model||"qwen2.5:3b";
+ const b=$("modeBadge");
+ if(status.drive_root_exists){b.className="badge ok";b.textContent=status.ollama_online?"Whisper + Ollama listos":"Whisper listo · Ollama en respaldo"}
+ else{b.className="badge";b.textContent="Falta elegir carpeta"};
+}
+refresh();
+
+$("folderBtn").onclick=async()=>{
+ $("folderBtn").disabled=true;
+ try{
+  const r=await fetch("/api/select-folder",{method:"POST"}); const d=await r.json();
+  if(!r.ok)throw new Error(d.error||"No se pudo abrir el selector.");
+  await refresh();
+ }catch(e){alert(e.message)}
+ finally{$("folderBtn").disabled=false}
+};
+$("settingsBtn").onclick=()=>{$("settings").classList.add("show");refresh()};
+$("cancel").onclick=()=>$("settings").classList.remove("show");
+$("save").onclick=async()=>{
+ const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({drive_root:$("rootInput").value,whisper_model:$("whisper").value,ollama_model:$("ollama").value})});
+ const d=await r.json(); if(!r.ok){alert(d.error||"Error");return}
+ $("settings").classList.remove("show"); await refresh();
+};
+
+function log(t,bad=false){$("log").classList.add("show");$("log").textContent+=( $("log").textContent?"\n":"")+(bad?"❌ ":"✓ ")+t;$("log").scrollTop=$("log").scrollHeight}
+function progress(v){$("progress").classList.add("show");$("bar").style.width=v+"%"}
+
+$("process").onclick=async()=>{
+ if(!status.drive_root_exists){alert("Primero elegí la carpeta raíz sincronizada con Google Drive.");return}
+ if(reports.some(r=>!r.audio||!r.photo)){alert("Cada informe necesita audio y foto.");return}
+ $("process").disabled=true;$("add").disabled=true;$("log").textContent="";$("log").className="log show";progress(5);
+ const fd=new FormData();fd.append("date",$("date").value);
+ reports.forEach((r,i)=>{fd.append("audio_"+(i+1),r.audio);fd.append("photo_"+(i+1),r.photo)});
+ log("Copiando archivos a la carpeta del día…");progress(12);
+ try{
+  const r=await fetch("/api/process-batch",{method:"POST",body:fd});
+  progress(70); const d=await r.json();
+  if(!r.ok)throw new Error(d.error||"No se pudo procesar el lote.");
+  d.reports.forEach(x=>log("Informe "+String(x.number).padStart(2,"0")+" · "+x.title+(x.used_ollama?"":" · resumen de respaldo")));
+  (d.failures||[]).forEach(x=>log("Informe "+x.number+" · "+x.error,true));
+  log("Word creado: "+d.word_file);log("TXT creado: "+d.text_file);log("Guardado en: "+d.folder);
+  progress(100);$("log").classList.add("success");$("process").textContent="✓ Lote terminado";
+ }catch(e){log(e.message||String(e),true);$("log").classList.add("error");$("process").disabled=false;$("add").disabled=false}
+};
+</script>
+</body>
+</html>
