@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini escucha el audio directamente · v14</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini 3.6 escucha el audio directamente · v15</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -161,7 +161,7 @@ Usá español argentino neutro y buena ortografía.
 No inventes nombres, edades, lugares, cargos, cifras ni hechos. Si alguna palabra es dudosa por la calidad del audio, inferila solo cuando el contexto sea muy claro; de lo contrario redactá sin afirmar ese dato dudoso.
 Respondé únicamente JSON válido con las claves exactas: title, short_summary, expanded_summary, transcript_excerpt.`;
 
- const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",{
+ const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",{
    method:"POST",
    headers:{
      "Authorization":"Bearer "+accessToken,
@@ -177,7 +177,6 @@ Respondé únicamente JSON válido con las claves exactas: title, short_summary,
        ]
      }],
      generationConfig:{
-       temperature:0.1,
        responseMimeType:"application/json"
      }
    })
