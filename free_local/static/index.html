@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Gestor de Informes FM Ciudad · Gratis</title>
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#080b12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Informes FM">
+<link rel="apple-touch-icon" href="/static/icon.svg">
 <style>
 :root{--bg:#080b12;--panel:#111722;--line:#29344a;--text:#f6f8fb;--muted:#95a4ba;--green:#45d696;--blue:#72aaff;--red:#ff6f82}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 30% -10%,#1d2941,#080b12 45%);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}.wrap{max-width:920px;margin:auto;padding:20px 14px 70px}.head{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:18px}.head h1{margin:0;font-size:clamp(23px,5vw,34px)}.head p{margin:5px 0 0;color:var(--muted)}.badge{border:1px solid var(--line);background:#0e1522;border-radius:999px;padding:9px 12px;font-size:12px;white-space:nowrap}.badge.ok{color:#bfffe2;border-color:#256b51}.card{background:linear-gradient(180deg,#121a28,#0e141f);border:1px solid var(--line);border-radius:18px;padding:17px;margin-bottom:14px;box-shadow:0 18px 40px #0005}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:200px}.label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em;margin:0 0 6px}.input{width:100%;background:#0a1019;color:white;border:1px solid var(--line);border-radius:11px;padding:12px;outline:none}.btn{border:0;border-radius:11px;padding:11px 14px;font-weight:800;cursor:pointer;background:#222c3e;color:white}.btn.primary{background:var(--green);color:#062219}.btn.blue{background:var(--blue);color:#071424}.btn.red{background:#371722;color:#ff9baa}.btn:disabled{opacity:.45;cursor:not-allowed}.report{border:1px solid var(--line);background:#0a1019;border-radius:14px;padding:14px;margin-top:12px}.reporthead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:11px}.n{font-size:21px;font-weight:900}.state{font-size:12px;color:var(--muted)}.files{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pick{position:relative;min-height:82px;border:1px dashed #3b4962;border-radius:12px;padding:13px;background:#101724;display:flex;flex-direction:column;justify-content:center}.pick input{position:absolute;inset:0;opacity:0;cursor:pointer}.pick strong{font-size:13px}.pick span{font-size:12px;color:var(--muted);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}.stat{border:1px solid var(--line);border-radius:11px;background:#0a1019;padding:11px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--muted)}.progress{height:9px;background:#080d15;border:1px solid var(--line);border-radius:20px;overflow:hidden;margin-top:14px;display:none}.progress.show{display:block}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--green));transition:width .25s}.log{display:none;margin-top:12px;white-space:pre-wrap;background:#070c13;border:1px solid var(--line);border-radius:11px;padding:12px;color:#cbd6e6;font-size:12px;max-height:230px;overflow:auto}.log.show{display:block}.tiny{font-size:12px;color:var(--muted);line-height:1.45;margin-top:8px}.dest{margin-top:10px;padding:11px;border-radius:11px;background:#0a1019;border:1px solid var(--line);font-size:12px;color:#c7d3e5;word-break:break-all}.modal{display:none;position:fixed;inset:0;background:#000b;z-index:20;align-items:center;justify-content:center;padding:16px}.modal.show{display:flex}.modalbox{width:min(560px,100%);background:#111722;border:1px solid var(--line);border-radius:17px;padding:18px}.modalbox h2{margin:0 0 7px}.modalbox p{font-size:13px;color:var(--muted);line-height:1.5}.success{border-color:#247151!important}.error{border-color:#73303d!important}
@@ -52,7 +58,7 @@
 
   <div class="card">
     <b>Desde el celular</b>
-    <div class="tiny">Si el iPhone está conectado a la misma Wi‑Fi que la PC, podés abrir esta misma app desde:</div>
+    <div class="tiny">En iPhone abrí esta dirección en Safari. Después tocá <b>Compartir → Agregar a pantalla de inicio</b> y te queda como app. Si usamos Tailscale, también podés entrar desde afuera de la Wi‑Fi mientras la PC esté encendida.</div>
     <div id="lan" class="dest">Cargando dirección…</div>
   </div>
 </div>
@@ -154,6 +160,9 @@ $("process").onclick=async()=>{
   progress(100);$("log").classList.add("success");$("process").textContent="✓ Lote terminado";
  }catch(e){log(e.message||String(e),true);$("log").classList.add("error");$("process").disabled=false;$("add").disabled=false}
 };
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/static/service-worker.js").catch(()=>{}));
+}
 </script>
 </body>
 </html>
