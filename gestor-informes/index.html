@@ -62,9 +62,7 @@
   <div class="modalbox">
     <h2>Configuración</h2>
     <p>Para subir automáticamente a tu Google Drive, esta web necesita un <b>Google OAuth Client ID</b>. No es una clave paga y queda guardado solo en tu navegador.</p>
-    <label class="label">Google OAuth Client ID</label>
-    <input id="clientId" class="input" placeholder="xxxxxxxx.apps.googleusercontent.com">
-    <label class="label" style="margin-top:12px">Modelo Whisper</label>
+<label class="label" style="margin-top:12px">Modelo Whisper</label>
     <select id="model" class="input">
       <option value="onnx-community/whisper-tiny">Tiny · recomendado para celular</option>
       <option value="onnx-community/whisper-base">Base · más preciso, más pesado</option>
@@ -81,6 +79,7 @@ import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transfo
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "https://cdn.jsdelivr.net/npm/docx@9.5.1/+esm";
 
 const ROOT_FOLDER_ID = "1N0f3SOnAmCuXs3AlfOpRCcwL-zgJEP94";
+const GOOGLE_CLIENT_ID = "242853096419-5cs8dd5vlbhamh5fig3vrv94qkhupqis.apps.googleusercontent.com";
 const $=id=>document.getElementById(id);
 let reports=[{audio:null,photo:null}];
 let accessToken="";
@@ -124,22 +123,20 @@ render();
 $("add").onclick=()=>{reports.push({audio:null,photo:null});render()};
 
 function openSettings(){
- $("clientId").value=localStorage.getItem("fm_google_client_id")||"";
  $("model").value=localStorage.getItem("fm_whisper_model")||"onnx-community/whisper-tiny";
  $("settings").classList.add("show");
 }
 $("settingsBtn").onclick=openSettings;
 $("cancel").onclick=()=>$("settings").classList.remove("show");
 $("save").onclick=()=>{
- localStorage.setItem("fm_google_client_id",$("clientId").value.trim());
  localStorage.setItem("fm_whisper_model",$("model").value);
  $("settings").classList.remove("show");
  initGoogle();
 };
 
 function initGoogle(){
- const clientId=localStorage.getItem("fm_google_client_id");
- if(!clientId||!window.google?.accounts?.oauth2)return;
+ const clientId=GOOGLE_CLIENT_ID;
+ if(!window.google?.accounts?.oauth2)return;
  tokenClient=google.accounts.oauth2.initTokenClient({
   client_id:clientId,
   scope:"https://www.googleapis.com/auth/drive",
@@ -153,7 +150,6 @@ function initGoogle(){
 }
 window.addEventListener("load",()=>setTimeout(initGoogle,600));
 $("connect").onclick=()=>{
- if(!localStorage.getItem("fm_google_client_id")){openSettings();return}
  initGoogle();
  setTimeout(()=>tokenClient?tokenClient.requestAccessToken({prompt:accessToken?"":"consent"}):alert("Google todavía está cargando. Probá de nuevo."),150);
 };
