@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · redacción periodística con IA · v13</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini escucha el audio directamente · v14</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -36,7 +36,7 @@
       <button id="connect" class="btn blue">Conectar Google Drive</button>
     </div>
     <div class="tiny">Destino fijo: carpeta raíz de informes. La web crea o reutiliza automáticamente una subcarpeta <b>DD-MM-AAAA</b>.</div>
-    <div class="notice">La primera vez puede tardar porque el iPhone descarga Whisper Base. Después Gemini redacta el título y el resumen formal usando el nivel gratuito del proyecto de Google.</div>
+    <div class="notice">Gemini analiza el audio directamente en la nube: el iPhone ya no descarga Whisper ni ejecuta modelos pesados. Archivos de audio de hasta 18 MB por informe.</div>
   </div>
 
   <div class="card">
@@ -61,7 +61,6 @@
 </div>
 
 <script type="module">
-import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.15.1/+esm";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "https://cdn.jsdelivr.net/npm/docx@9.5.1/+esm";
 
 const ROOT_FOLDER_ID = "1N0f3SOnAmCuXs3AlfOpRCcwL-zgJEP94";
@@ -71,10 +70,6 @@ const $=id=>document.getElementById(id);
 let reports=[{audio:null,photo:null}];
 let accessToken="";
 let tokenClient=null;
-let transcriber=null;
-let transcriberModel="";
-env.allowLocalModels=false;
-env.useBrowserCache=true;
 
 function today(){
  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Argentina/Buenos_Aires",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
@@ -132,89 +127,39 @@ $("connect").onclick=()=>{
 function log(t,bad=false){$("log").classList.add("show");$("log").textContent+=( $("log").textContent?"\n":"")+(bad?"❌ ":"✓ ")+t;$("log").scrollTop=$("log").scrollHeight}
 function progress(v){$("progress").classList.add("show");$("bar").style.width=Math.max(0,Math.min(100,v))+"%"}
 
-async function loadWhisperModel(model,label){
- log("Cargando "+label+"…");
- try {
-   if (env?.backends?.onnx?.wasm) {
-     env.backends.onnx.wasm.numThreads = 1;
-     env.backends.onnx.wasm.proxy = false;
-   }
- } catch (_) {}
- const opts={
-   quantized:true,
-   progress_callback:p=>{
-     if(p?.status==="progress"&&Number.isFinite(p.progress)) {
-       progress(Math.max(3,Math.min(18,p.progress*0.18)));
-     }
-   }
- };
- return pipeline("automatic-speech-recognition",model,opts);
-}
-
-async function getTranscriber(){
- if(transcriber)return transcriber;
- try{
-   transcriberModel="Xenova/whisper-base";
-   transcriber=await loadWhisperModel(transcriberModel,"Whisper Base (mejor español)");
-   log("Whisper Base listo.");
- }catch(e){
-   log("Whisper Base no pudo cargarse; usando Tiny como respaldo.",true);
-   transcriberModel="Xenova/whisper-tiny";
-   transcriber=await loadWhisperModel(transcriberModel,"Whisper Tiny");
-   log("Whisper Tiny listo.");
- }
- return transcriber;
-}
-
-const STOP=new Set(("a al algo algunas algunos ante antes como con contra cual cuando de del desde donde dos el ella ellas ellos en entre era eran es esa esas ese eso esos esta estaba estaban este esto estos fue fueron ha hay la las le les lo los mas más me mi muy no nos o para pero por porque que qué se si sin sobre su sus te tiene todo un una unas uno unos y ya yo e u").split(/\s+/));
-function words(s){return (s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").match(/[a-zñáéíóúü]{3,}/g)||[]).filter(w=>!STOP.has(w))}
-function analyzeTranscript(text){
- const clean=text.replace(/\s+/g," ").trim();
- const sentences=(clean.match(/[^.!?]+[.!?]?/g)||[clean]).map(s=>s.trim()).filter(Boolean);
- const freq={};for(const w of words(clean))freq[w]=(freq[w]||0)+1;
- const scored=sentences.map((s,i)=>{
-  const ws=words(s);let score=ws.reduce((a,w)=>a+(freq[w]||0),0)/(Math.sqrt(ws.length||1));
-  score*=1+(i===0?0.16:0);return {s,i,score};
+function fileToBase64(file){
+ return new Promise((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onload=()=>{
+     const result=String(reader.result||"");
+     const comma=result.indexOf(",");
+     resolve(comma>=0?result.slice(comma+1):result);
+   };
+   reader.onerror=()=>reject(reader.error||new Error("No se pudo leer el audio."));
+   reader.readAsDataURL(file);
  });
- const best=[...scored].sort((a,b)=>b.score-a.score);
- const titleSentence=(best[0]?.s||sentences[0]||"Informe").replace(/^[,;:\-\s]+/,"");
- let tw=titleSentence.replace(/[.!?]+$/,"").split(/\s+/).slice(0,13).join(" ");
- if(tw.length>85)tw=tw.slice(0,85).replace(/\s+\S*$/,"");
- const shortIdx=best.slice(0,2).map(x=>x.i).sort((a,b)=>a-b);
- const short=shortIdx.map(i=>sentences[i]).join(" ").trim();
- const chosen=[];let count=0;
- for(const x of best.slice(0,8).sort((a,b)=>a.i-b.i)){
-  const n=x.s.split(/\s+/).length;if(count+n>125&&chosen.length>=3)continue;
-  chosen.push(x);count+=n;if(count>=80||chosen.length>=5)break;
+}
+
+async function editorialFromAudio(file){
+ if(file.size > 18 * 1024 * 1024){
+   throw new Error("El audio pesa más de 18 MB. Esta versión móvil procesa archivos de hasta 18 MB para mantenerse estable en iPhone.");
  }
- const expanded=chosen.sort((a,b)=>a.i-b.i).map(x=>x.s).join(" ").trim()||short||clean.slice(0,900);
- return {title:safeTitle(tw),short_summary:short||clean.slice(0,280),expanded_summary:expanded};
-}
-
-async function transcribeFile(file){
- const pipe=await getTranscriber();
- const url=URL.createObjectURL(file);
- try{
-  const out=await pipe(url,{language:"spanish",task:"transcribe",chunk_length_s:30,stride_length_s:5});
-  return String(out.text||"").replace(/\s+/g," ").trim();
- }finally{URL.revokeObjectURL(url)}
-}
-
-async function editorialWithGemini(transcript){
+ log("Gemini está escuchando y analizando el audio…");
+ const base64=await fileToBase64(file);
+ const mime=file.type||"audio/mp4";
  const prompt=`Actuá como editor periodístico profesional de FM Ciudad 89.7 de Río Gallegos.
 
-La siguiente transcripción fue realizada automáticamente y puede contener errores fonéticos o palabras mal reconocidas. Interpretá el contexto para corregir SOLO errores evidentes de reconocimiento. No inventes nombres, cifras, lugares, cargos ni hechos que no estén respaldados por la transcripción.
+Escuchá cuidadosamente el audio completo. No copies textual lo que dice el conductor y no uses saludos, muletillas, repeticiones ni comentarios de relleno.
 
-Necesito:
-1) "title": título periodístico claro, natural y correctamente escrito, entre 7 y 14 palabras. No copies una frase textual del audio.
-2) "short_summary": síntesis informativa de 1 o 2 oraciones.
-3) "expanded_summary": UN párrafo formal de entre 80 y 130 palabras, redactado en tercera persona, explicando de qué trata el informe. Debe eliminar saludos, muletillas, repeticiones, comentarios del conductor y frases de relleno. NO debe ser una transcripción ni una cita textual.
+Necesito que devuelvas:
+1) "title": un título periodístico claro, natural y correctamente escrito, entre 7 y 14 palabras. Debe describir el hecho principal.
+2) "short_summary": una síntesis informativa de 1 o 2 oraciones.
+3) "expanded_summary": UN solo párrafo formal de entre 80 y 130 palabras, redactado en tercera persona, explicando de qué trata el informe.
+4) "transcript_excerpt": una breve transcripción corregida de las partes clave, solo para control interno.
 
 Usá español argentino neutro y buena ortografía.
-Respondé únicamente JSON válido con las claves title, short_summary y expanded_summary.
-
-TRANSCRIPCIÓN:
-${transcript}`;
+No inventes nombres, edades, lugares, cargos, cifras ni hechos. Si alguna palabra es dudosa por la calidad del audio, inferila solo cuando el contexto sea muy claro; de lo contrario redactá sin afirmar ese dato dudoso.
+Respondé únicamente JSON válido con las claves exactas: title, short_summary, expanded_summary, transcript_excerpt.`;
 
  const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",{
    method:"POST",
@@ -224,19 +169,30 @@ ${transcript}`;
      "Content-Type":"application/json"
    },
    body:JSON.stringify({
-     contents:[{role:"user",parts:[{text:prompt}]}],
-     generationConfig:{temperature:0.15,responseMimeType:"application/json"}
+     contents:[{
+       role:"user",
+       parts:[
+         {text:prompt},
+         {inlineData:{mimeType:mime,data:base64}}
+       ]
+     }],
+     generationConfig:{
+       temperature:0.1,
+       responseMimeType:"application/json"
+     }
    })
  });
  const raw=await r.text();
- if(!r.ok)throw new Error("Gemini "+r.status+": "+raw.slice(0,350));
+ if(!r.ok)throw new Error("Gemini "+r.status+": "+raw.slice(0,500));
  const data=JSON.parse(raw);
  const txt=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("").trim()||"";
+ if(!txt)throw new Error("Gemini no devolvió contenido.");
  const parsed=JSON.parse(txt);
  return {
    title:safeTitle(parsed.title||"Informe"),
    short_summary:String(parsed.short_summary||"").trim(),
-   expanded_summary:String(parsed.expanded_summary||"").trim()
+   expanded_summary:String(parsed.expanded_summary||"").trim(),
+   transcript:String(parsed.transcript_excerpt||"").trim()
  };
 }
 
@@ -255,7 +211,7 @@ async function removePreviousSummaries(folderId){
  const q="'"+folderId+"' in parents and trashed=false";
  const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
  const d=await r.json();
- const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\.(docx|txt)$/i.test(f.name));
+ const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\\.(docx|txt)$/i.test(f.name));
  await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
    method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
  })));
@@ -307,15 +263,13 @@ $("process").onclick=async()=>{
   const folder=await getOrCreateDailyFolder();log("Carpeta "+folderDate()+" lista.");
   const results=[];
   for(let i=0;i<reports.length;i++){
-   const n=String(i+1).padStart(2,"0");log("Transcribiendo Informe "+n+"…");
-   const transcript=await transcribeFile(reports[i].audio);
-   if(!transcript)throw new Error("No se detectó voz en el Informe "+n);
-   log("Redactando título y resumen formal con Gemini…");
+   const n=String(i+1).padStart(2,"0");
+   log("Analizando Informe "+n+" directamente con Gemini…");
    let a;
    try{
-     a=await editorialWithGemini(transcript);
+     a=await editorialFromAudio(reports[i].audio);
    }catch(err){
-     throw new Error("Gemini no pudo redactar el informe. No se subieron archivos para evitar títulos o resúmenes incorrectos. Detalle: "+(err.message||err));
+     throw new Error("No se pudo analizar el Informe "+n+". No se subieron archivos para evitar títulos o resúmenes incorrectos. Detalle: "+(err.message||err));
    }
    await removePreviousGenerated(folder.id,i+1);
    const audioName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].audio.name,"mp3");
@@ -325,7 +279,7 @@ $("process").onclick=async()=>{
     uploadBlob(reports[i].audio,audioName,reports[i].audio.type,folder.id),
     uploadBlob(reports[i].photo,photoName,reports[i].photo.type,folder.id)
    ]);
-   results.push({number:i+1,...a,transcript});
+   results.push({number:i+1,...a,transcript:a.transcript||""});
    progress(20+Math.round(((i+1)/reports.length)*62));
   }
   log("Generando Word y TXT…");
