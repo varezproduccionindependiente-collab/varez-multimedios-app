@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · versión iPhone compatible · v11</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · redacción periodística con IA · v12</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -36,7 +36,7 @@
       <button id="connect" class="btn blue">Conectar Google Drive</button>
     </div>
     <div class="tiny">Destino fijo: carpeta raíz de informes. La web crea o reutiliza automáticamente una subcarpeta <b>DD-MM-AAAA</b>.</div>
-    <div class="notice">La primera vez que transcribas, el navegador descargará el modelo gratuito de Whisper. Después queda en caché. En audios largos puede tardar varios minutos.</div>
+    <div class="notice">La primera vez puede tardar porque el iPhone descarga Whisper Base. Después Gemini redacta el título y el resumen formal usando el nivel gratuito del proyecto de Google.</div>
   </div>
 
   <div class="card">
@@ -66,6 +66,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "https://cdn.
 
 const ROOT_FOLDER_ID = "1N0f3SOnAmCuXs3AlfOpRCcwL-zgJEP94";
 const GOOGLE_CLIENT_ID = "242853096419-5cs8dd5vlbhamh5fig3vrv94qkhupqis.apps.googleusercontent.com";
+const GOOGLE_PROJECT_ID = "gestor-informes-fm-ciudad";
 const $=id=>document.getElementById(id);
 let reports=[{audio:null,photo:null}];
 let accessToken="";
@@ -113,7 +114,7 @@ function initGoogle(){
  if(!window.google?.accounts?.oauth2)return;
  tokenClient=google.accounts.oauth2.initTokenClient({
   client_id:clientId,
-  scope:"https://www.googleapis.com/auth/drive",
+  scope:"https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/cloud-platform",
   callback:r=>{
    if(r.error){log("Google: "+r.error,true);return}
    accessToken=r.access_token;
@@ -131,10 +132,8 @@ $("connect").onclick=()=>{
 function log(t,bad=false){$("log").classList.add("show");$("log").textContent+=( $("log").textContent?"\n":"")+(bad?"❌ ":"✓ ")+t;$("log").scrollTop=$("log").scrollHeight}
 function progress(v){$("progress").classList.add("show");$("bar").style.width=Math.max(0,Math.min(100,v))+"%"}
 
-async function getTranscriber(){
- const model="Xenova/whisper-tiny";
- if(transcriber&&transcriberModel===model)return transcriber;
- log("Cargando Whisper Tiny compatible con iPhone…");
+async function loadWhisperModel(model,label){
+ log("Cargando "+label+"…");
  try {
    if (env?.backends?.onnx?.wasm) {
      env.backends.onnx.wasm.numThreads = 1;
@@ -149,9 +148,21 @@ async function getTranscriber(){
      }
    }
  };
- transcriber=await pipeline("automatic-speech-recognition",model,opts);
- transcriberModel=model;
- log("Whisper Tiny listo.");
+ return pipeline("automatic-speech-recognition",model,opts);
+}
+
+async function getTranscriber(){
+ if(transcriber)return transcriber;
+ try{
+   transcriberModel="Xenova/whisper-base";
+   transcriber=await loadWhisperModel(transcriberModel,"Whisper Base (mejor español)");
+   log("Whisper Base listo.");
+ }catch(e){
+   log("Whisper Base no pudo cargarse; usando Tiny como respaldo.",true);
+   transcriberModel="Xenova/whisper-tiny";
+   transcriber=await loadWhisperModel(transcriberModel,"Whisper Tiny");
+   log("Whisper Tiny listo.");
+ }
  return transcriber;
 }
 
@@ -184,9 +195,70 @@ async function transcribeFile(file){
  const pipe=await getTranscriber();
  const url=URL.createObjectURL(file);
  try{
-  const out=await pipe(url,{language:"spanish",task:"transcribe",chunk_length_s:25,stride_length_s:4});
+  const out=await pipe(url,{language:"spanish",task:"transcribe",chunk_length_s:30,stride_length_s:5});
   return String(out.text||"").replace(/\s+/g," ").trim();
  }finally{URL.revokeObjectURL(url)}
+}
+
+async function editorialWithGemini(transcript){
+ const prompt=`Actuá como editor periodístico profesional de FM Ciudad 89.7 de Río Gallegos.
+
+La siguiente transcripción fue realizada automáticamente y puede contener errores fonéticos o palabras mal reconocidas. Interpretá el contexto para corregir SOLO errores evidentes de reconocimiento. No inventes nombres, cifras, lugares, cargos ni hechos que no estén respaldados por la transcripción.
+
+Necesito:
+1) "title": título periodístico claro, natural y correctamente escrito, entre 7 y 14 palabras. No copies una frase textual del audio.
+2) "short_summary": síntesis informativa de 1 o 2 oraciones.
+3) "expanded_summary": UN párrafo formal de entre 80 y 130 palabras, redactado en tercera persona, explicando de qué trata el informe. Debe eliminar saludos, muletillas, repeticiones, comentarios del conductor y frases de relleno. NO debe ser una transcripción ni una cita textual.
+
+Usá español argentino neutro y buena ortografía.
+Respondé únicamente JSON válido con las claves title, short_summary y expanded_summary.
+
+TRANSCRIPCIÓN:
+${transcript}`;
+
+ const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",{
+   method:"POST",
+   headers:{
+     "Authorization":"Bearer "+accessToken,
+     "x-goog-user-project":GOOGLE_PROJECT_ID,
+     "Content-Type":"application/json"
+   },
+   body:JSON.stringify({
+     contents:[{role:"user",parts:[{text:prompt}]}],
+     generationConfig:{temperature:0.15,responseMimeType:"application/json"}
+   })
+ });
+ const raw=await r.text();
+ if(!r.ok)throw new Error("Gemini "+r.status+": "+raw.slice(0,350));
+ const data=JSON.parse(raw);
+ const txt=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("").trim()||"";
+ const parsed=JSON.parse(txt);
+ return {
+   title:safeTitle(parsed.title||"Informe"),
+   short_summary:String(parsed.short_summary||"").trim(),
+   expanded_summary:String(parsed.expanded_summary||"").trim()
+ };
+}
+
+async function removePreviousGenerated(folderId,number){
+ const n=String(number).padStart(2,"0");
+ const q="'"+folderId+"' in parents and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
+ const d=await r.json();
+ const targets=(d.files||[]).filter(f=>f.name.startsWith("Informe "+n+" - "));
+ await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
+   method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
+ })));
+}
+
+async function removePreviousSummaries(folderId){
+ const q="'"+folderId+"' in parents and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
+ const d=await r.json();
+ const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\.(docx|txt)$/i.test(f.name));
+ await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
+   method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
+ })));
 }
 
 async function driveFetch(url,options={}){
@@ -238,7 +310,15 @@ $("process").onclick=async()=>{
    const n=String(i+1).padStart(2,"0");log("Transcribiendo Informe "+n+"…");
    const transcript=await transcribeFile(reports[i].audio);
    if(!transcript)throw new Error("No se detectó voz en el Informe "+n);
-   const a=analyzeTranscript(transcript);
+   log("Redactando título y resumen formal con Gemini…");
+   let a;
+   try{
+     a=await editorialWithGemini(transcript);
+   }catch(err){
+     log("Gemini no respondió; usando resumen local de respaldo: "+(err.message||err),true);
+     a=analyzeTranscript(transcript);
+   }
+   await removePreviousGenerated(folder.id,i+1);
    const audioName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].audio.name,"mp3");
    const photoName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].photo.name,"jpg");
    log("Subiendo Informe "+n+" · "+a.title);
@@ -250,6 +330,7 @@ $("process").onclick=async()=>{
    progress(20+Math.round(((i+1)/reports.length)*62));
   }
   log("Generando Word y TXT…");
+  await removePreviousSummaries(folder.id);
   const word=await makeDocx(folderDate(),results);
   const txt=new Blob([results.map(r=>"Informe "+String(r.number).padStart(2,"0")+" - "+r.title+"\n"+r.expanded_summary).join("\n\n")],{type:"text/plain;charset=utf-8"});
   await Promise.all([
