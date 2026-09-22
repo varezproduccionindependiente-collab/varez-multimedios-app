@@ -55,7 +55,7 @@
     <div class="stats">
       <div class="stat"><b id="total">1</b><span>informes</span></div>
       <div class="stat"><b id="ready">0</b><span>listos</span></div>
-      <div class="stat"><b>Word + TXT</b><span>al finalizar</span></div>
+      <div class="stat"><b>Solo Word</b><span>al finalizar</span></div>
     </div>
     <div id="progress" class="progress"><div id="bar" class="bar"></div></div>
     <div id="log" class="log"></div>
@@ -213,7 +213,7 @@ async function removePreviousSummaries(folderId){
  const q="'"+folderId+"' in parents and trashed=false";
  const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
  const d=await r.json();
- const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\\.(docx|txt)$/i.test(f.name));
+ const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\.(docx|txt)$/i.test(f.name));
  await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
    method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
  })));
@@ -284,7 +284,7 @@ $("process").onclick=async()=>{
    results.push({number:i+1,...a,transcript:a.transcript||""});
    progress(20+Math.round(((i+1)/reports.length)*62));
   }
-  log("Generando Word y TXT…");
+  log("Generando Word…");
   await removePreviousSummaries(folder.id);
   const word=await makeDocx(folderDate(),results);
   const txt=new Blob([results.map(r=>"Informe "+String(r.number).padStart(2,"0")+" - "+r.title+"\n"+r.expanded_summary).join("\n\n")],{type:"text/plain;charset=utf-8"});
