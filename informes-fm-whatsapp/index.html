@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080b12">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Informes FM">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon.svg">
+<title>Gestor de Informes FM Ciudad</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{--bg:#080b12;--panel:#111722;--line:#29344a;--text:#f6f8fb;--muted:#95a4ba;--green:#45d696;--blue:#72aaff;--red:#ff6f82;--amber:#ffc857}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 30% -10%,#1d2941,#080b12 45%);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}.wrap{max-width:920px;margin:auto;padding:18px 14px 70px}.head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:18px}.head h1{margin:0;font-size:clamp(23px,5vw,34px)}.head p{margin:5px 0 0;color:var(--muted)}.badge{border:1px solid var(--line);background:#0e1522;border-radius:999px;padding:9px 12px;font-size:12px;white-space:nowrap}.badge.ok{color:#bfffe2;border-color:#256b51}.card{background:linear-gradient(180deg,#121a28,#0e141f);border:1px solid var(--line);border-radius:18px;padding:17px;margin-bottom:14px;box-shadow:0 18px 40px #0005}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:200px}.label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em;margin:0 0 6px}.input{width:100%;background:#0a1019;color:white;border:1px solid var(--line);border-radius:11px;padding:12px;outline:none}.btn{border:0;border-radius:11px;padding:11px 14px;font-weight:800;cursor:pointer;background:#222c3e;color:white}.btn.primary{background:var(--green);color:#062219}.btn.blue{background:var(--blue);color:#071424}.btn.red{background:#371722;color:#ff9baa}.btn:disabled{opacity:.45;cursor:not-allowed}.report{border:1px solid var(--line);background:#0a1019;border-radius:14px;padding:14px;margin-top:12px}.reporthead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:11px}.n{font-size:21px;font-weight:900}.state{font-size:12px;color:var(--muted)}.files{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pick{position:relative;min-height:82px;border:1px dashed #3b4962;border-radius:12px;padding:13px;background:#101724;display:flex;flex-direction:column;justify-content:center}.pick input{position:absolute;inset:0;opacity:0;cursor:pointer}.pick strong{font-size:13px}.pick span{font-size:12px;color:var(--muted);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}.stat{border:1px solid var(--line);border-radius:11px;background:#0a1019;padding:11px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--muted)}.progress{height:9px;background:#080d15;border:1px solid var(--line);border-radius:20px;overflow:hidden;margin-top:14px;display:none}.progress.show{display:block}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--green));transition:width .25s}.log{display:none;margin-top:12px;white-space:pre-wrap;background:#070c13;border:1px solid var(--line);border-radius:11px;padding:12px;color:#cbd6e6;font-size:12px;max-height:240px;overflow:auto}.log.show{display:block}.tiny{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px}.dest{margin-top:10px;padding:11px;border-radius:11px;background:#0a1019;border:1px solid var(--line);font-size:12px;color:#c7d3e5;word-break:break-all}.modal{display:none;position:fixed;inset:0;background:#000b;z-index:20;align-items:center;justify-content:center;padding:16px}.modal.show{display:flex}.modalbox{width:min(560px,100%);background:#111722;border:1px solid var(--line);border-radius:17px;padding:18px}.modalbox h2{margin:0 0 7px}.modalbox p{font-size:13px;color:var(--muted);line-height:1.5}.notice{border:1px solid #6f5a21;background:#211c0d;color:#ffe8a3;padding:11px;border-radius:11px;font-size:12px;line-height:1.45;margin-top:10px}.success{border-color:#247151!important}.error{border-color:#73303d!important}
+@media(max-width:650px){.head{flex-direction:column}.files,.stats{grid-template-columns:1fr}.wrap{padding-top:14px}.btn{min-height:44px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · Gemini 3.6 · v17 · WhatsApp directo</p></div>
+    <div id="driveBadge" class="badge">Drive desconectado</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="grow">
+        <label class="label">Fecha del lote</label>
+        <input id="date" class="input" type="date">
+      </div>
+      <button id="connect" class="btn blue">Conectar Google Drive</button>
+    </div>
+    <div class="tiny">Destino fijo: carpeta raíz de informes. La web crea o reutiliza automáticamente una subcarpeta <b>DD-MM-AAAA</b>.</div>
+    <div class="notice">Gemini analiza el audio directamente en la nube: el iPhone ya no descarga Whisper ni ejecuta modelos pesados. Archivos de audio de hasta 18 MB por informe.</div>
+  </div>
+
+  <div class="card" id="waCard">
+    <div class="row" style="justify-content:space-between">
+      <div class="grow">
+        <b style="font-size:19px">📲 Recibidos desde WhatsApp</b>
+        <div class="tiny">Cada vez que compartís 1 audio + 1 foto con el atajo <b>FM Ciudad</b>, quedan unidos como un solo informe.</div>
+      </div>
+      <button id="refreshInbox" class="btn">Actualizar</button>
+    </div>
+    <div id="inboxState" class="dest" style="margin-top:12px">Conectá Google Drive para consultar la bandeja.</div>
+    <div id="inboxList" style="margin-top:10px"></div>
+    <button id="syncInbox" class="btn primary" style="width:100%;margin-top:12px;padding:14px" disabled>Pasar recibidos a Drive</button>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><b style="font-size:19px">Informes del día</b><div class="tiny">Cada informe lleva audio + foto.</div></div>
+      <button id="add" class="btn">+ Agregar informe</button>
+    </div>
+    <div id="reports"></div>
+  </div>
+
+  <div class="card">
+    <b>Procesamiento automático</b>
+    <div class="stats">
+      <div class="stat"><b id="total">1</b><span>informes</span></div>
+      <div class="stat"><b id="ready">0</b><span>listos</span></div>
+      <div class="stat"><b>Solo Word</b><span>al finalizar</span></div>
+    </div>
+    <div id="progress" class="progress"><div id="bar" class="bar"></div></div>
+    <div id="log" class="log"></div>
+    <button id="process" class="btn primary" style="width:100%;margin-top:14px;padding:14px">Procesar y subir todo</button>
+  </div>
+</div>
+
+<script type="module">
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "https://cdn.jsdelivr.net/npm/docx@9.5.1/+esm";
+import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
+
+const ROOT_FOLDER_ID = "1N0f3SOnAmCuXs3AlfOpRCcwL-zgJEP94";
+const GOOGLE_CLIENT_ID = "242853096419-5cs8dd5vlbhamh5fig3vrv94qkhupqis.apps.googleusercontent.com";
+const GOOGLE_PROJECT_ID = "gestor-informes-fm-ciudad";
+const INBOX_API = "https://fggygohsaoxlscgefshm.supabase.co/functions/v1/fm-ciudad-inbox";
+const $=id=>document.getElementById(id);
+let reports=[{audio:null,photo:null}];
+let accessToken="";
+let tokenClient=null;
+let inboxItems=[];
+
+function today(){
+ const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Argentina/Buenos_Aires",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+ const x=Object.fromEntries(parts.map(p=>[p.type,p.value])); return x.year+"-"+x.month+"-"+x.day;
+}
+$("date").value=today();
+function folderDate(){const [y,m,d]=$("date").value.split("-");return d+"-"+m+"-"+y}
+function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]))}
+function safeTitle(s){
+ return String(s||"Informe").replace(/[\\/:*?"<>|]/g,"").replace(/\s+/g," ").trim().slice(0,90)||"Informe";
+}
+function fileExt(name,fallback){const x=String(name||"").split(".");return x.length>1?x.pop().toLowerCase():fallback}
+
+function render(){
+ $("reports").innerHTML="";
+ reports.forEach((r,i)=>{
+  const box=document.createElement("div");box.className="report";
+  box.innerHTML=`
+    <div class="reporthead"><div><span class="n">${String(i+1).padStart(2,"0")}</span> <b>Informe ${i+1}</b></div>
+    <div class="row"><span class="state">${r.audio&&r.photo?"Listo":"Faltan archivos"}</span>${reports.length>1?'<button class="btn red remove">Eliminar</button>':""}</div></div>
+    <div class="files">
+      <label class="pick"><strong>🎙️ Elegir audio</strong><span>${r.audio?esc(r.audio.name):"MP3, WAV, M4A, AAC…"}</span><input class="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"></label>
+      <label class="pick"><strong>🖼️ Elegir foto</strong><span>${r.photo?esc(r.photo.name):"JPG, PNG, HEIC, WebP…"}</span><input class="photo" type="file" accept="image/*,.heic,.heif"></label>
+    </div>`;
+  box.querySelector(".audio").onchange=e=>{reports[i].audio=e.target.files[0]||null;render()};
+  box.querySelector(".photo").onchange=e=>{reports[i].photo=e.target.files[0]||null;render()};
+  const rm=box.querySelector(".remove");if(rm)rm.onclick=()=>{reports.splice(i,1);render()};
+  $("reports").appendChild(box);
+ });
+ $("total").textContent=reports.length;$("ready").textContent=reports.filter(r=>r.audio&&r.photo).length;
+}
+render();
+$("add").onclick=()=>{reports.push({audio:null,photo:null});render()};
+
+function initGoogle(){
+ const clientId=GOOGLE_CLIENT_ID;
+ if(!window.google?.accounts?.oauth2)return;
+ tokenClient=google.accounts.oauth2.initTokenClient({
+  client_id:clientId,
+  scope:"https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
+  callback:r=>{
+   if(r.error){log("Google: "+r.error,true);return}
+   accessToken=r.access_token;
+   $("driveBadge").className="badge ok";$("driveBadge").textContent="Drive conectado";
+   $("connect").textContent="Reconectar Drive";
+  }
+ });
+}
+window.addEventListener("load",()=>setTimeout(initGoogle,600));
+$("connect").onclick=()=>{
+ initGoogle();
+ setTimeout(()=>tokenClient?tokenClient.requestAccessToken({prompt:accessToken?"":"consent"}):alert("Google todavía está cargando. Probá de nuevo."),150);
+};
+
+function log(t,bad=false){$("log").classList.add("show");$("log").textContent+=( $("log").textContent?"\n":"")+(bad?"❌ ":"✓ ")+t;$("log").scrollTop=$("log").scrollHeight}
+function progress(v){$("progress").classList.add("show");$("bar").style.width=Math.max(0,Math.min(100,v))+"%"}
+
+function fileToBase64(file){
+ return new Promise((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onload=()=>{
+     const result=String(reader.result||"");
+     const comma=result.indexOf(",");
+     resolve(comma>=0?result.slice(comma+1):result);
+   };
+   reader.onerror=()=>reject(reader.error||new Error("No se pudo leer el audio."));
+   reader.readAsDataURL(file);
+ });
+}
+
+async function editorialFromAudio(file){
+ if(file.size > 18 * 1024 * 1024){
+   throw new Error("El audio pesa más de 18 MB. Esta versión móvil procesa archivos de hasta 18 MB para mantenerse estable en iPhone.");
+ }
+ log("Gemini está escuchando y analizando el audio…");
+ const base64=await fileToBase64(file);
+ const mime=file.type||"audio/mp4";
+ const prompt=`Actuá como editor periodístico profesional de FM Ciudad 89.7 de Río Gallegos.
+
+Escuchá cuidadosamente el audio completo. No copies textual lo que dice el conductor y no uses saludos, muletillas, repeticiones ni comentarios de relleno.
+
+Necesito que devuelvas:
+1) "title": un título periodístico claro, natural y correctamente escrito, entre 7 y 14 palabras. Debe describir el hecho principal.
+2) "short_summary": una síntesis informativa de 1 o 2 oraciones.
+3) "expanded_summary": UN solo párrafo formal de entre 80 y 130 palabras, redactado en tercera persona, explicando de qué trata el informe.
+4) "transcript_excerpt": una breve transcripción corregida de las partes clave, solo para control interno.
+
+Usá español argentino neutro y buena ortografía.
+No inventes nombres, edades, lugares, cargos, cifras ni hechos. Si alguna palabra es dudosa por la calidad del audio, inferila solo cuando el contexto sea muy claro; de lo contrario redactá sin afirmar ese dato dudoso.
+Respondé únicamente JSON válido con las claves exactas: title, short_summary, expanded_summary, transcript_excerpt.`;
+
+ const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",{
+   method:"POST",
+   headers:{
+     "Authorization":"Bearer "+accessToken,
+     "x-goog-user-project":GOOGLE_PROJECT_ID,
+     "Content-Type":"application/json"
+   },
+   body:JSON.stringify({
+     contents:[{
+       role:"user",
+       parts:[
+         {text:prompt},
+         {inlineData:{mimeType:mime,data:base64}}
+       ]
+     }],
+     generationConfig:{
+       responseMimeType:"application/json"
+     }
+   })
+ });
+ const raw=await r.text();
+ if(!r.ok)throw new Error("Gemini "+r.status+": "+raw.slice(0,500));
+ const data=JSON.parse(raw);
+ const txt=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("").trim()||"";
+ if(!txt)throw new Error("Gemini no devolvió contenido.");
+ const parsed=JSON.parse(txt);
+ return {
+   title:safeTitle(parsed.title||"Informe"),
+   short_summary:String(parsed.short_summary||"").trim(),
+   expanded_summary:String(parsed.expanded_summary||"").trim(),
+   transcript:String(parsed.transcript_excerpt||"").trim()
+ };
+}
+
+async function removePreviousGenerated(folderId,number){
+ const n=String(number).padStart(2,"0");
+ const q="'"+folderId+"' in parents and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
+ const d=await r.json();
+ const targets=(d.files||[]).filter(f=>f.name.startsWith("Informe "+n+" - "));
+ await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
+   method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
+ })));
+}
+
+async function removePreviousSummaries(folderId){
+ const q="'"+folderId+"' in parents and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=100");
+ const d=await r.json();
+ const targets=(d.files||[]).filter(f=>/^Resumen de informes .*\.(docx|txt)$/i.test(f.name));
+ await Promise.all(targets.map(f=>driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(f.id),{
+   method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})
+ })));
+}
+
+async function driveFetch(url,options={}){
+ const r=await fetch(url,{...options,headers:{Authorization:"Bearer "+accessToken,...(options.headers||{})}});
+ if(!r.ok){const t=await r.text();throw new Error("Drive "+r.status+": "+t.slice(0,250))}
+ return r;
+}
+async function getOrCreateDailyFolder(){
+ const name=folderDate();
+ const q="'"+ROOT_FOLDER_ID+"' in parents and name='"+name+"' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=10");
+ const d=await r.json();if(d.files?.length)return d.files[0];
+ const c=await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,mimeType:"application/vnd.google-apps.folder",parents:[ROOT_FOLDER_ID]})});
+ return c.json();
+}
+async function uploadBlob(blob,name,mime,folderId){
+ const start=await driveFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink",{
+  method:"POST",headers:{"Content-Type":"application/json","X-Upload-Content-Type":mime||blob.type||"application/octet-stream","X-Upload-Content-Length":String(blob.size)},
+  body:JSON.stringify({name,parents:[folderId]})
+ });
+ const loc=start.headers.get("Location");if(!loc)throw new Error("Drive no inició la carga.");
+ const up=await fetch(loc,{method:"PUT",headers:{"Content-Type":mime||blob.type||"application/octet-stream"},body:blob});
+ if(!up.ok){const t=await up.text();throw new Error("Error subiendo archivo: "+t.slice(0,200))}
+ return up.json();
+}
+
+
+async function inboxFetch(action,options={}){
+ const sep=INBOX_API.includes("?")?"&":"?";
+ const r=await fetch(INBOX_API+sep+"action="+encodeURIComponent(action),{
+   ...options,
+   headers:{Authorization:"Bearer "+accessToken,...(options.headers||{})}
+ });
+ const raw=await r.text();
+ let d;try{d=JSON.parse(raw)}catch{d={error:raw}}
+ if(!r.ok)throw new Error(d.error||("Bandeja "+r.status));
+ return d;
+}
+
+function inboxStatusHTML(items){
+ if(!items.length)return '<div class="tiny">No hay informes recibidos por WhatsApp para esta fecha.</div>';
+ return items.map(x=>{
+   const n=x.drive_number||x.report_number||"?";
+   const done=x.status==="done";
+   return '<div class="report" style="margin-top:8px"><div class="reporthead" style="margin:0"><div><b>Informe '+String(n).padStart(2,"0")+'</b><div class="tiny" style="margin-top:3px">'+esc(x.title||"Procesado")+'</div></div><span class="state">'+(done?"✓ En Drive":"Listo para pasar a Drive")+'</span></div></div>';
+ }).join("");
+}
+
+async function refreshInbox(){
+ if(!accessToken){
+   $("inboxState").textContent="Conectá Google Drive para consultar la bandeja.";
+   $("syncInbox").disabled=true;return [];
+ }
+ const d=await inboxFetch("day&date="+encodeURIComponent($("date").value));
+ inboxItems=d.items||[];
+ const pending=inboxItems.filter(x=>x.status!=="done").length;
+ const done=inboxItems.filter(x=>x.status==="done").length;
+ $("inboxState").innerHTML='<b>'+pending+'</b> pendiente'+(pending===1?"":"s")+' · <b>'+done+'</b> ya guardado'+(done===1?"":"s")+' en Drive.';
+ $("inboxList").innerHTML=inboxStatusHTML(inboxItems);
+ $("syncInbox").disabled=pending===0;
+ return inboxItems;
+}
+
+async function getDriveFiles(folderId){
+ const q="'"+folderId+"' in parents and trashed=false";
+ const r=await driveFetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name,mimeType)&pageSize=200");
+ return (await r.json()).files||[];
+}
+
+function usedReportNumbers(files){
+ const s=new Set();
+ for(const f of files){
+   const m=String(f.name||"").match(/^Informe\s+(\d{1,3})\s+-\s+/i);
+   if(m)s.add(Number(m[1]));
+ }
+ return s;
+}
+
+async function readExistingWordSummaries(folderId){
+ try{
+   const files=await getDriveFiles(folderId);
+   const target=files.find(f=>f.name==="Resumen de informes "+folderDate()+".docx");
+   if(!target)return [];
+   const r=await driveFetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(target.id)+"?alt=media");
+   const buf=await r.arrayBuffer();
+   const zip=await JSZip.loadAsync(buf);
+   const entry=zip.file("word/document.xml");
+   if(!entry)return [];
+   const xml=await entry.async("string");
+   const dom=new DOMParser().parseFromString(xml,"application/xml");
+   const ps=[...dom.getElementsByTagNameNS("*","p")].map(p=>
+     [...p.getElementsByTagNameNS("*","t")].map(t=>t.textContent||"").join("").trim()
+   );
+   const out=[];let current=null;
+   for(const line of ps){
+     const m=line.match(/^Informe\s+(\d{1,3})\s+-\s+(.+)$/i);
+     if(m){
+       if(current)out.push(current);
+       current={number:Number(m[1]),title:m[2].trim(),expanded_summary:""};
+     }else if(current&&line){
+       current.expanded_summary+=(current.expanded_summary?" ":"")+line;
+     }
+   }
+   if(current)out.push(current);
+   return out.filter(x=>x.number&&x.title&&x.expanded_summary);
+ }catch(e){
+   log("No pude leer el Word anterior; voy a conservar los informes recibidos en esta tanda.",true);
+   return [];
+ }
+}
+
+async function markInboxComplete(item,number){
+ await inboxFetch("complete",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({id:item.id,drive_title:item.title,drive_number:number})
+ });
+ item.status="done";item.drive_number=number;
+}
+
+async function blobFromURL(url){
+ const r=await fetch(url);
+ if(!r.ok)throw new Error("No pude descargar un archivo recibido por WhatsApp.");
+ return r.blob();
+}
+
+$("refreshInbox").onclick=()=>refreshInbox().catch(e=>{
+ $("inboxState").textContent="Error: "+(e.message||e);
+});
+
+$("date").addEventListener("change",()=>{if(accessToken)refreshInbox().catch(()=>{})});
+
+$("syncInbox").onclick=async()=>{
+ if(!accessToken){alert("Primero conectá Google Drive.");return}
+ $("syncInbox").disabled=true;$("log").textContent="";$("log").className="log show";progress(2);
+ try{
+   const items=await refreshInbox();
+   const pending=items.filter(x=>x.status!=="done");
+   if(!pending.length){log("No hay informes nuevos de WhatsApp.");return}
+   const folder=await getOrCreateDailyFolder();log("Carpeta "+folderDate()+" lista.");
+   const existingFiles=await getDriveFiles(folder.id);
+   const used=usedReportNumbers(existingFiles);
+   let next=1;while(used.has(next))next++;
+   const existingSummaries=await readExistingWordSummaries(folder.id);
+
+   for(let i=0;i<pending.length;i++){
+     const item=pending[i];
+     let number=item.drive_number?Number(item.drive_number):0;
+     if(!number||used.has(number)){
+       while(used.has(next))next++;
+       number=next;used.add(number);next++;
+     }
+     const n=String(number).padStart(2,"0");
+     log("Subiendo recibido de WhatsApp como Informe "+n+" · "+item.title);
+     const [audioBlob,photoBlob]=await Promise.all([blobFromURL(item.audio_url),blobFromURL(item.photo_url)]);
+     await removePreviousGenerated(folder.id,number);
+     const audioName="Informe "+n+" - "+safeTitle(item.title)+"."+fileExt(item.audio_name,"m4a");
+     const photoName="Informe "+n+" - "+safeTitle(item.title)+"."+fileExt(item.photo_name,"jpg");
+     await Promise.all([
+       uploadBlob(audioBlob,audioName,item.audio_mime||audioBlob.type,folder.id),
+       uploadBlob(photoBlob,photoName,item.photo_mime||photoBlob.type,folder.id)
+     ]);
+     await markInboxComplete(item,number);
+     progress(15+Math.round(((i+1)/pending.length)*65));
+   }
+
+   const queueSummaries=items.map(x=>({
+     number:Number(x.drive_number||x.report_number),
+     title:safeTitle(x.title||"Informe"),
+     expanded_summary:String(x.expanded_summary||"").trim()
+   })).filter(x=>x.number&&x.expanded_summary);
+
+   const merged=new Map();
+   for(const x of existingSummaries)merged.set(Number(x.number),x);
+   for(const x of queueSummaries)merged.set(Number(x.number),x);
+   const all=[...merged.values()].sort((a,b)=>a.number-b.number);
+
+   log("Actualizando el Word general…");
+   await removePreviousSummaries(folder.id);
+   const word=await makeDocx(folderDate(),all);
+   await uploadBlob(word,"Resumen de informes "+folderDate()+".docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",folder.id);
+   progress(100);log("WhatsApp → Drive terminado. Word actualizado.");$("log").classList.add("success");
+   await refreshInbox();
+ }catch(e){
+   log(e.message||String(e),true);$("log").classList.add("error");
+   $("syncInbox").disabled=false;
+ }
+};
+
+async function makeDocx(dateLabel,data){
+ const children=[
+  new Paragraph({text:"Resumen de informes - FM Ciudad 89.7",heading:HeadingLevel.TITLE}),
+  new Paragraph({children:[new TextRun({text:"Fecha: "+dateLabel,bold:true})]}),
+  new Paragraph({text:""})
+ ];
+ for(const r of data){
+  children.push(new Paragraph({text:"Informe "+String(r.number).padStart(2,"0")+" - "+r.title,heading:HeadingLevel.HEADING_1}));
+  children.push(new Paragraph({text:r.expanded_summary}));
+  children.push(new Paragraph({text:""}));
+ }
+ return Packer.toBlob(new Document({sections:[{children}]}));
+}
+
+$("process").onclick=async()=>{
+ if(!accessToken){alert("Primero conectá Google Drive.");return}
+ if(reports.some(r=>!r.audio||!r.photo)){alert("Cada informe necesita audio y foto.");return}
+ $("process").disabled=true;$("add").disabled=true;$("log").textContent="";$("log").className="log show";progress(2);
+ try{
+  const folder=await getOrCreateDailyFolder();log("Carpeta "+folderDate()+" lista.");
+  const results=[];
+  for(let i=0;i<reports.length;i++){
+   const n=String(i+1).padStart(2,"0");
+   log("Analizando Informe "+n+" directamente con Gemini…");
+   let a;
+   try{
+     a=await editorialFromAudio(reports[i].audio);
+   }catch(err){
+     throw new Error("No se pudo analizar el Informe "+n+". No se subieron archivos para evitar títulos o resúmenes incorrectos. Detalle: "+(err.message||err));
+   }
+   await removePreviousGenerated(folder.id,i+1);
+   const audioName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].audio.name,"mp3");
+   const photoName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].photo.name,"jpg");
+   log("Subiendo Informe "+n+" · "+a.title);
+   await Promise.all([
+    uploadBlob(reports[i].audio,audioName,reports[i].audio.type,folder.id),
+    uploadBlob(reports[i].photo,photoName,reports[i].photo.type,folder.id)
+   ]);
+   results.push({number:i+1,...a,transcript:a.transcript||""});
+   progress(20+Math.round(((i+1)/reports.length)*62));
+  }
+  log("Generando Word…");
+  await removePreviousSummaries(folder.id);
+  const word=await makeDocx(folderDate(),results);
+  await uploadBlob(word,"Resumen de informes "+folderDate()+".docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",folder.id);
+  progress(100);log("Todo quedó guardado en Drive.");$("log").classList.add("success");$("process").textContent="✓ Lote terminado";
+ }catch(e){
+  log(e.message||String(e),true);$("log").classList.add("error");$("process").disabled=false;$("add").disabled=false;
+ }
+};
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister())).catch(()=>{});
+}
+</script>
+</body></html>
