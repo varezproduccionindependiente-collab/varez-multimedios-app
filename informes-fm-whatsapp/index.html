@@ -262,7 +262,7 @@ async function uploadBlob(blob,name,mime,folderId){
 
 async function inboxFetch(action,options={}){
  const sep=INBOX_API.includes("?")?"&":"?";
- const r=await fetch(INBOX_API+sep+"action="+encodeURIComponent(action),{
+ const r=await fetch(INBOX_API+sep+"action="+action,{
    ...options,
    headers:{Authorization:"Bearer "+accessToken,...(options.headers||{})}
  });
