@@ -287,11 +287,7 @@ $("process").onclick=async()=>{
   log("Generando Word…");
   await removePreviousSummaries(folder.id);
   const word=await makeDocx(folderDate(),results);
-  const txt=new Blob([results.map(r=>"Informe "+String(r.number).padStart(2,"0")+" - "+r.title+"\n"+r.expanded_summary).join("\n\n")],{type:"text/plain;charset=utf-8"});
-  await Promise.all([
-    uploadBlob(word,"Resumen de informes "+folderDate()+".docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",folder.id),
-    uploadBlob(txt,"Resumen de informes "+folderDate()+".txt","text/plain;charset=utf-8",folder.id)
-  ]);
+  await uploadBlob(word,"Resumen de informes "+folderDate()+".docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",folder.id);
   progress(100);log("Todo quedó guardado en Drive.");$("log").classList.add("success");$("process").textContent="✓ Lote terminado";
  }catch(e){
   log(e.message||String(e),true);$("log").classList.add("error");$("process").disabled=false;$("add").disabled=false;
