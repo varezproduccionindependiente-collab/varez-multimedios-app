@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/process.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    }
+  }
+}
