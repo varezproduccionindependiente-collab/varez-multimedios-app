@@ -13,7 +13,12 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Descargar solo la app gratis
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            free_local
+          sparse-checkout-cone-mode: true
 
       - name: Crear paquete
         run: |
