@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · redacción periodística con IA · v12</p></div>
+    <div><h1>Gestor de Informes FM Ciudad</h1><p>Web móvil · redacción periodística con IA · v13</p></div>
     <div id="driveBadge" class="badge">Drive desconectado</div>
   </div>
 
@@ -114,7 +114,7 @@ function initGoogle(){
  if(!window.google?.accounts?.oauth2)return;
  tokenClient=google.accounts.oauth2.initTokenClient({
   client_id:clientId,
-  scope:"https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/cloud-platform",
+  scope:"https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
   callback:r=>{
    if(r.error){log("Google: "+r.error,true);return}
    accessToken=r.access_token;
@@ -315,8 +315,7 @@ $("process").onclick=async()=>{
    try{
      a=await editorialWithGemini(transcript);
    }catch(err){
-     log("Gemini no respondió; usando resumen local de respaldo: "+(err.message||err),true);
-     a=analyzeTranscript(transcript);
+     throw new Error("Gemini no pudo redactar el informe. No se subieron archivos para evitar títulos o resúmenes incorrectos. Detalle: "+(err.message||err));
    }
    await removePreviousGenerated(folder.id,i+1);
    const audioName="Informe "+n+" - "+a.title+"."+fileExt(reports[i].audio.name,"mp3");
