@@ -426,6 +426,36 @@ function naturalNameKey_(name) {
     .replace(/(\d+)/g, function(m){ return ("000000000000" + m).slice(-12); });
 }
 
+function resetearPruebas() {
+  const props = PropertiesService.getScriptProperties();
+
+  // Borra únicamente estados/caché de lotes del sistema.
+  props.getKeys().forEach(function(key) {
+    if (key.indexOf("REPORT_") === 0) props.deleteProperty(key);
+  });
+
+  // Limpia la cola temporal, sin tocar la carpeta principal de informes.
+  const queueId = props.getProperty("QUEUE_FOLDER_ID");
+  if (queueId) {
+    try {
+      const q = DriveApp.getFolderById(queueId);
+      const files = q.getFiles();
+      while (files.hasNext()) {
+        try { files.next().setTrashed(true); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  // Elimina disparadores duplicados y deja uno solo permanente.
+  const triggers = ScriptApp.getProjectTriggers().filter(function(t){
+    return t.getHandlerFunction() === "processBatchQueue_";
+  });
+  triggers.forEach(function(t){ try { ScriptApp.deleteTrigger(t); } catch (_) {} });
+  ensurePermanentQueueTrigger_();
+
+  return "✅ Sistema de lotes reiniciado desde cero. Caché eliminado y cola limpia.";
+}
+
 function autorizar() {
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
   const testDoc = DocumentApp.create("FM Ciudad - prueba de autorización");
