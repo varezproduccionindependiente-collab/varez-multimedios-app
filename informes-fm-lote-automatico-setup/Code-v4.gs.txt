@@ -1,0 +1,728 @@
+const ROOT_FOLDER_ID = "1N0f3SOnAmCuXs3AlfOpRCcwL-zgJEP94";
+const GOOGLE_PROJECT_ID = "gestor-informes-fm-ciudad";
+const SHARE_TOKEN = "Hm_KRbaJM2Z4SRNaBf6GatlnnvBFaB0QKdNzapPwiII";
+const TIMEZONE = "America/Argentina/Buenos_Aires";
+
+const GEMINI_MODELS = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash"
+];
+
+function doGet() {
+  return json_({
+    ok: true,
+    service: "Carga de informes por lote automática FM ciudad",
+    version: "4.0",
+    mode: "recepción rápida + cola permanente cada minuto"
+  });
+}
+
+function doPost(e) {
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    if (String(body.token || "") !== SHARE_TOKEN) {
+      return json_({ok:false, message:"❌ Acceso no autorizado."});
+    }
+
+    const b64 = String(body.zip_base64 || "").replace(/\s+/g, "");
+    if (!b64) return json_({ok:false, message:"❌ No llegó el paquete de informes."});
+
+    const zipBytes = Utilities.base64Decode(b64);
+    if (zipBytes.length > 30 * 1024 * 1024) {
+      return json_({ok:false, message:"❌ El lote supera 30 MB. Dividilo en dos envíos."});
+    }
+
+    const batchHash = sha256Hex_(zipBytes);
+    const props = PropertiesService.getScriptProperties();
+    let state = readState_(props, batchHash);
+
+    if (state && state.queue_version === 4 &&
+        ["received","queued","processing","done","done_with_errors"].indexOf(state.status) >= 0) {
+      return json_({
+        ok:true,
+        duplicate:true,
+        message: (state.status === "done" || state.status === "done_with_errors")
+          ? "✅ Este lote ya terminó de procesarse."
+          : "✅ Este lote ya fue recibido y sigue en la cola automática."
+      });
+    }
+
+    const queueFolder = getQueueFolder_();
+    const shortHash = batchHash.slice(0,8);
+    const storedZip = queueFolder.createFile(
+      Utilities.newBlob(zipBytes, "application/zip", "LOTE_" + shortHash + ".zip")
+    );
+
+    state = {
+      queue_version:4,
+      status:"received",
+      zip_file_id:storedZip.getId(),
+      date_label:Utilities.formatDate(new Date(), TIMEZONE, "dd-MM-yyyy"),
+      created_at:new Date().toISOString()
+    };
+    writeState_(props, batchHash, state);
+
+    return json_({
+      ok:true,
+      queued:true,
+      message:"✅ Lote recibido correctamente. Se procesará automáticamente dentro del próximo minuto."
+    });
+
+  } catch (err) {
+    return json_({
+      ok:false,
+      message:"❌ LOTE: " + (err && err.message ? err.message : String(err))
+    });
+  }
+}
+
+function getQueueFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty("QUEUE_FOLDER_ID");
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (_) {}
+  }
+  const root = DriveApp.getRootFolder();
+  const name = "_FM_CIUDAD_COLA_TEMPORAL_NO_BORRAR";
+  const found = root.getFoldersByName(name);
+  const folder = found.hasNext() ? found.next() : root.createFolder(name);
+  props.setProperty("QUEUE_FOLDER_ID", folder.getId());
+  return folder;
+}
+
+function ensurePermanentQueueTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const queueTriggers = triggers.filter(function(t){
+    return t.getHandlerFunction() === "processBatchQueue_";
+  });
+
+  // Dejamos un único disparador permanente.
+  for (let i = 1; i < queueTriggers.length; i++) {
+    try { ScriptApp.deleteTrigger(queueTriggers[i]); } catch (_) {}
+  }
+
+  if (!queueTriggers.length) {
+    ScriptApp.newTrigger("processBatchQueue_")
+      .timeBased()
+      .everyMinutes(1)
+      .create();
+  }
+}
+
+function processBatchQueue_() {
+  const started = Date.now();
+  const maxRunMs = 240000;
+  const props = PropertiesService.getScriptProperties();
+
+  while (Date.now() - started < maxRunMs) {
+    const job = findNextQueuedBatch_(props);
+    if (!job) return;
+
+    const hash = job.hash;
+    let state = job.state;
+
+    if (!state.initialized) {
+      try {
+        state = initializeQueuedBatch_(props, hash, state);
+      } catch (initErr) {
+        const msg = initErr && initErr.message ? initErr.message : String(initErr);
+        try {
+          const folder = getOrCreateDailyFolderByName_(state.date_label);
+          folder.createFile(
+            "❌ ERROR LOTE " + hash.slice(0,8) + ".txt",
+            "No se pudo iniciar el lote.\n\nMotivo: " + msg
+          );
+        } catch (_) {}
+        state.status = "error";
+        state.last_error = msg;
+        state.failed_at = new Date().toISOString();
+        writeState_(props, hash, state);
+        try { if (state.zip_file_id) DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+        continue;
+      }
+    }
+
+    const pairIndex = (state.pairs || []).findIndex(function(p){
+      return p.status !== "done" && p.status !== "error";
+    });
+
+    if (pairIndex < 0) {
+      finishQueuedBatch_(props, hash, state);
+      continue;
+    }
+
+    state.status = "processing";
+    state.started_at = state.started_at || new Date().toISOString();
+    writeState_(props, hash, state);
+
+    try {
+      processQueuedPair_(props, hash, state, pairIndex);
+    } catch (err) {
+      state = readState_(props, hash) || state;
+      const p = state.pairs[pairIndex];
+      p.attempts = Number(p.attempts || 0) + 1;
+      p.last_error = err && err.message ? err.message : String(err);
+      p.last_error_at = new Date().toISOString();
+
+      if (p.attempts >= 5) {
+        p.status = "error";
+        try {
+          const folder = getOrCreateDailyFolderByName_(state.date_label);
+          folder.createFile(
+            "❌ ERROR - Informe " + pad2_(p.number) + ".txt",
+            "No se pudo procesar este informe después de 5 intentos.\n\nMotivo: " + p.last_error
+          );
+        } catch (_) {}
+      } else {
+        p.status = "queued";
+      }
+
+      state.pairs[pairIndex] = p;
+      state.status = "queued";
+      writeState_(props, hash, state);
+
+      // Si fue un error temporal, dejamos que el próximo disparador vuelva a intentar.
+      if (p.status === "queued") return;
+    }
+  }
+}
+
+function findNextQueuedBatch_(props) {
+  const jobs = [];
+  props.getKeys().forEach(function(key){
+    if (key.indexOf("REPORT_") !== 0) return;
+    const raw = props.getProperty(key);
+    if (!raw) return;
+    try {
+      const state = JSON.parse(raw);
+      if (state.queue_version === 4 &&
+          (state.status === "received" || state.status === "queued" || state.status === "processing")) {
+        jobs.push({
+          hash:key.slice("REPORT_".length),
+          state:state
+        });
+      }
+    } catch (_) {}
+  });
+
+  jobs.sort(function(a,b){
+    return String(a.state.created_at || "").localeCompare(String(b.state.created_at || ""));
+  });
+  return jobs.length ? jobs[0] : null;
+}
+
+function initializeQueuedBatch_(props, hash, state) {
+  const shortHash = hash.slice(0, 8);
+  const zipFile = DriveApp.getFileById(state.zip_file_id);
+  const zipBlob = Utilities.newBlob(
+    zipFile.getBlob().getBytes(),
+    "application/zip",
+    "lote.zip"
+  );
+
+  const parts = Utilities.unzip(zipBlob).filter(function(b){
+    const n = String(b.getName() || "");
+    return b.getBytes().length > 0 &&
+      !/\/$/.test(n) &&
+      !/^__MACOSX\//.test(n) &&
+      !/(^|\/)\.DS_Store$/.test(n);
+  });
+
+  const audios = parts.filter(function(b){ return isAudio_(b.getName()); });
+  const photos = parts.filter(function(b){ return isImage_(b.getName()); });
+  const unsupported = parts.filter(function(b){
+    return !isAudio_(b.getName()) && !isImage_(b.getName());
+  });
+
+  if (unsupported.length) {
+    throw new Error("El lote contiene " + unsupported.length + " archivo(s) que no son audio ni foto.");
+  }
+  if (!audios.length || audios.length !== photos.length) {
+    throw new Error("El lote debe tener la misma cantidad de audios y fotos. Recibí " +
+      audios.length + " audio(s) y " + photos.length + " foto(s).");
+  }
+  if (audios.length > 8) {
+    throw new Error("Esta versión admite hasta 8 informes por envío.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const dailyFolder = getOrCreateDailyFolderByName_(state.date_label);
+    const startNumber = nextReportNumber_(dailyFolder);
+    const reserved = [];
+
+    for (let i = 0; i < audios.length; i++) {
+      const number = startNumber + i;
+      const reservation = dailyFolder.createFile(
+        "Informe " + pad2_(number) + " - RESERVADO LOTE " + shortHash + ".txt",
+        "Reserva temporal del lote. El procesamiento continúa automáticamente."
+      );
+      reserved.push({
+        number:number,
+        status:"queued",
+        reservation_id:reservation.getId(),
+        attempts:0
+      });
+    }
+
+    state.initialized = true;
+    state.status = "queued";
+    state.pair_count = audios.length;
+    state.folder_id = dailyFolder.getId();
+    state.pairs = reserved;
+    state.initialized_at = new Date().toISOString();
+    writeState_(props, hash, state);
+    return state;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function processQueuedPair_(props, hash, state, pairIndex) {
+  const pstate = state.pairs[pairIndex];
+  const zipFile = DriveApp.getFileById(state.zip_file_id);
+  const zipBlob = Utilities.newBlob(
+    zipFile.getBlob().getBytes(),
+    "application/zip",
+    "lote.zip"
+  );
+
+  const parts = Utilities.unzip(zipBlob).filter(function(b){
+    const n = String(b.getName() || "");
+    return b.getBytes().length > 0 &&
+      !/\/$/.test(n) &&
+      !/^__MACOSX\//.test(n) &&
+      !/(^|\/)\.DS_Store$/.test(n);
+  });
+
+  const audios = parts.filter(function(b){ return isAudio_(b.getName()); }).sort(blobNameCompare_);
+  const photos = parts.filter(function(b){ return isImage_(b.getName()); }).sort(blobNameCompare_);
+
+  if (audios.length !== state.pair_count || photos.length !== state.pair_count) {
+    throw new Error("El ZIP temporal ya no coincide con el lote original.");
+  }
+
+  const audioBlob = audios[pairIndex];
+  const photoBlob = photos[pairIndex];
+  const analysis = analyzeAudio_(audioBlob);
+  const title = safeTitle_(analysis.title);
+  const n = pad2_(pstate.number);
+  const folder = getOrCreateDailyFolderByName_(state.date_label);
+  state.folder_id = folder.getId();
+
+  const audioName = "Informe " + n + " - " + title + "." +
+    fileExt_(audioBlob.getName(), "m4a");
+  const photoName = "Informe " + n + " - " + title + "." +
+    fileExt_(photoBlob.getName(), "jpg");
+
+  const created = [];
+  try {
+    const a = audioBlob.copyBlob()
+      .setContentType(mimeFor_(audioBlob.getName(), true))
+      .setName(audioName);
+    const p = photoBlob.copyBlob()
+      .setContentType(mimeFor_(photoBlob.getName(), false))
+      .setName(photoName);
+
+    created.push(folder.createFile(a));
+    created.push(folder.createFile(p));
+  } catch (uploadErr) {
+    created.forEach(function(f){ try { f.setTrashed(true); } catch (_) {} });
+    throw uploadErr;
+  }
+
+  pstate.status = "media_uploaded";
+  pstate.title = title;
+  pstate.expanded_summary = String(analysis.expanded_summary || "");
+  pstate.audio_file_id = created[0].getId();
+  pstate.photo_file_id = created[1].getId();
+  pstate.last_error = "";
+  state.pairs[pairIndex] = pstate;
+  writeState_(props, hash, state);
+
+  const existing = readExistingSummaries_(folder);
+  const merged = {};
+  existing.forEach(function(x){ merged[String(x.number)] = x; });
+  merged[String(pstate.number)] = {
+    number:pstate.number,
+    title:pstate.title,
+    expanded_summary:pstate.expanded_summary
+  };
+
+  const all = Object.keys(merged)
+    .map(function(k){ return merged[k]; })
+    .sort(function(a,b){ return a.number - b.number; });
+
+  writeSummaryDocx_(folder, all);
+
+  if (pstate.reservation_id) {
+    try { DriveApp.getFileById(pstate.reservation_id).setTrashed(true); } catch (_) {}
+  }
+
+  pstate.status = "done";
+  pstate.finished_at = new Date().toISOString();
+  state.pairs[pairIndex] = pstate;
+
+  const allFinished = state.pairs.every(function(p){ return p.status === "done" || p.status === "error"; });
+  const hasErrors = state.pairs.some(function(p){ return p.status === "error"; });
+  state.status = allFinished ? (hasErrors ? "done_with_errors" : "done") : "queued";
+  if (allFinished) state.finished_at = new Date().toISOString();
+  writeState_(props, hash, state);
+
+  if (allFinished) {
+    try { DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+  }
+}
+
+function finishQueuedBatch_(props, hash, state) {
+  const hasErrors = (state.pairs || []).some(function(p){ return p.status === "error"; });
+  state.status = hasErrors ? "done_with_errors" : "done";
+  state.finished_at = state.finished_at || new Date().toISOString();
+  writeState_(props, hash, state);
+  if (state.zip_file_id) {
+    try { DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+  }
+}
+
+function cleanupLegacyBatch_(state, shortHash) {
+  if (!state) return;
+  (state.pairs || []).forEach(function(p){
+    ["reservation_id","audio_file_id","photo_file_id"].forEach(function(k){
+      if (p && p[k]) {
+        try { DriveApp.getFileById(p[k]).setTrashed(true); } catch (_) {}
+      }
+    });
+  });
+
+  if (state.folder_id) {
+    try {
+      cleanupReservationsForHash_(DriveApp.getFolderById(state.folder_id), shortHash);
+    } catch (_) {}
+  }
+}
+
+function cleanupReservationsForHash_(folder, shortHash) {
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    if (name.indexOf("RESERVADO LOTE " + shortHash) >= 0) {
+      try { f.setTrashed(true); } catch (_) {}
+    }
+  }
+}
+
+function blobNameCompare_(a, b) {
+  return naturalNameKey_(a.getName()).localeCompare(naturalNameKey_(b.getName()));
+}
+
+function naturalNameKey_(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/(\d+)/g, function(m){ return ("000000000000" + m).slice(-12); });
+}
+
+function autorizar() {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const testDoc = DocumentApp.create("FM Ciudad - prueba de autorización");
+  DriveApp.getFileById(testDoc.getId()).setTrashed(true);
+  UrlFetchApp.fetch("https://www.googleapis.com/drive/v3/about?fields=user", {
+    method:"get",
+    headers:{Authorization:"Bearer " + ScriptApp.getOAuthToken()},
+    muteHttpExceptions:true
+  });
+  ensurePermanentQueueTrigger_();
+  return "Autorización lista + cola automática cada minuto. Carpeta: " + root.getName();
+}
+
+function analyzeAudio_(audioBlob) {
+  const bytes = audioBlob.getBytes();
+  if (bytes.length > 18 * 1024 * 1024) {
+    throw new Error("El audio supera 18 MB.");
+  }
+
+  let mime = mimeFor_(audioBlob.getName(), true);
+  if (/\.m4a$/i.test(audioBlob.getName())) mime = "audio/mp4";
+
+  const prompt = [
+    "Actuá como editor periodístico profesional de FM Ciudad 89.7 de Río Gallegos.",
+    "Escuchá cuidadosamente el audio completo.",
+    "No copies textual lo que dice el conductor y no uses saludos, muletillas, repeticiones ni comentarios de relleno.",
+    "",
+    'Devolvé únicamente JSON válido con estas claves exactas:',
+    '"title": título periodístico claro y natural, entre 7 y 14 palabras.',
+    '"short_summary": síntesis informativa de 1 o 2 oraciones.',
+    '"expanded_summary": un único párrafo formal de 80 a 130 palabras, redactado en tercera persona.',
+    '"transcript_excerpt": breve transcripción corregida de las partes clave, solo para control interno.',
+    "",
+    "Usá español argentino neutro y buena ortografía.",
+    "No inventes nombres, edades, lugares, cargos, cifras ni hechos.",
+    "Si un dato no se escucha con suficiente claridad, redactá sin afirmarlo."
+  ].join("\n");
+
+  const payload = JSON.stringify({
+    contents:[{
+      role:"user",
+      parts:[
+        {text:prompt},
+        {inlineData:{mimeType:mime, data:Utilities.base64Encode(bytes)}}
+      ]
+    }],
+    generationConfig:{responseMimeType:"application/json"}
+  });
+
+  const token = ScriptApp.getOAuthToken();
+  let lastError = "";
+
+  for (let m = 0; m < GEMINI_MODELS.length; m++) {
+    const model = GEMINI_MODELS[m];
+    const waits = [0, 3500, 8000];
+
+    for (let a = 0; a < waits.length; a++) {
+      if (waits[a]) Utilities.sleep(waits[a]);
+
+      const r = UrlFetchApp.fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+          encodeURIComponent(model) + ":generateContent",
+        {
+          method:"post",
+          contentType:"application/json",
+          headers:{
+            Authorization:"Bearer " + token,
+            "x-goog-user-project":GOOGLE_PROJECT_ID
+          },
+          payload:payload,
+          muteHttpExceptions:true
+        }
+      );
+
+      const status = r.getResponseCode();
+      const raw = r.getContentText();
+
+      if (status >= 200 && status < 300) {
+        const d = JSON.parse(raw);
+        const txt = (((d.candidates || [])[0] || {}).content || {}).parts || [];
+        const joined = txt.map(function(p){ return p.text || ""; }).join("").trim();
+        if (!joined) throw new Error("Gemini no devolvió contenido.");
+
+        const parsed = JSON.parse(joined);
+        return {
+          title:safeTitle_(parsed.title || "Informe"),
+          short_summary:String(parsed.short_summary || "").trim(),
+          expanded_summary:String(parsed.expanded_summary || "").trim(),
+          transcript_excerpt:String(parsed.transcript_excerpt || "").trim()
+        };
+      }
+
+      lastError = "Gemini " + status + " (" + model + "): " + raw.slice(0, 350);
+      if (status === 404) break;
+      if (status !== 429 && status !== 503) throw new Error(lastError);
+    }
+  }
+
+  throw new Error(lastError || "Gemini no respondió después de probar los modelos disponibles.");
+}
+
+function getOrCreateDailyFolderByName_(name) {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const safeName = String(name || Utilities.formatDate(new Date(), TIMEZONE, "dd-MM-yyyy"));
+  const found = root.getFoldersByName(safeName);
+  if (found.hasNext()) return found.next();
+  return root.createFolder(safeName);
+}
+
+function getOrCreateDailyFolder_() {
+  const name = Utilities.formatDate(new Date(), TIMEZONE, "dd-MM-yyyy");
+  return getOrCreateDailyFolderByName_(name);
+}
+
+function nextReportNumber_(folder) {
+  let max = 0;
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const name = files.next().getName();
+    const m = name.match(/^Informe\s+(\d{1,3})\s+-\s+/i);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
+function readExistingSummaries_(folder) {
+  const summaryName = "Resumen de informes " +
+    Utilities.formatDate(new Date(), TIMEZONE, "dd-MM-yyyy") + ".docx";
+
+  const it = folder.getFilesByName(summaryName);
+  if (!it.hasNext()) return [];
+
+  const file = it.next();
+  let entries;
+  try {
+    // Un .docx es internamente un ZIP, pero Drive conserva su MIME de Word.
+    // Utilities.unzip puede rechazarlo si no normalizamos el blob como ZIP.
+    const raw = file.getBlob();
+    const zipBlob = Utilities.newBlob(raw.getBytes(), "application/zip", "summary.zip");
+    entries = Utilities.unzip(zipBlob);
+  } catch (err) {
+    throw new Error("No pude leer el Word anterior para actualizarlo sin perder información. " +
+      (err && err.message ? err.message : ""));
+  }
+
+  const xmlBlob = entries.filter(function(b){ return b.getName() === "word/document.xml"; })[0];
+  if (!xmlBlob) throw new Error("El Word anterior no tiene una estructura válida.");
+
+  const xml = xmlBlob.getDataAsString("UTF-8");
+  const paragraphs = [];
+  const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  let pm;
+
+  while ((pm = pRe.exec(xml)) !== null) {
+    let text = "";
+    const tRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+    let tm;
+    while ((tm = tRe.exec(pm[1])) !== null) text += decodeXml_(tm[1]);
+    paragraphs.push(text.trim());
+  }
+
+  const out = [];
+  let current = null;
+  paragraphs.forEach(function(line) {
+    const m = line.match(/^Informe\s+(\d{1,3})\s+-\s+(.+)$/i);
+    if (m) {
+      if (current) out.push(current);
+      current = {number:Number(m[1]), title:m[2].trim(), expanded_summary:""};
+    } else if (current && line) {
+      current.expanded_summary += (current.expanded_summary ? " " : "") + line;
+    }
+  });
+  if (current) out.push(current);
+
+  return out.filter(function(x){ return x.number && x.title && x.expanded_summary; });
+}
+
+function writeSummaryDocx_(folder, summaries) {
+  const dateLabel = Utilities.formatDate(new Date(), TIMEZONE, "dd-MM-yyyy");
+  const summaryName = "Resumen de informes " + dateLabel + ".docx";
+
+  const oldIds = [];
+  const old = folder.getFilesByName(summaryName);
+  while (old.hasNext()) oldIds.push(old.next().getId());
+
+  const doc = DocumentApp.create("TMP " + summaryName + " " + Date.now());
+  const body = doc.getBody();
+  body.clear();
+
+  body.appendParagraph("Resumen de informes - FM Ciudad 89.7")
+    .setHeading(DocumentApp.ParagraphHeading.TITLE);
+  body.appendParagraph("Fecha: " + dateLabel).editAsText().setBold(true);
+  body.appendParagraph("");
+
+  summaries.forEach(function(r) {
+    body.appendParagraph("Informe " + pad2_(r.number) + " - " + r.title)
+      .setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    body.appendParagraph(r.expanded_summary || "");
+    body.appendParagraph("");
+  });
+
+  doc.saveAndClose();
+
+  const exportUrl = "https://www.googleapis.com/drive/v3/files/" +
+    encodeURIComponent(doc.getId()) +
+    "/export?mimeType=" +
+    encodeURIComponent("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+  const response = UrlFetchApp.fetch(exportUrl, {
+    method:"get",
+    headers:{Authorization:"Bearer " + ScriptApp.getOAuthToken()},
+    muteHttpExceptions:true
+  });
+
+  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
+    DriveApp.getFileById(doc.getId()).setTrashed(true);
+    throw new Error("No pude exportar el Word final.");
+  }
+
+  const newFile = folder.createFile(response.getBlob().setName(summaryName));
+  oldIds.forEach(function(id) {
+    if (id !== newFile.getId()) {
+      try { DriveApp.getFileById(id).setTrashed(true); } catch (_) {}
+    }
+  });
+
+  DriveApp.getFileById(doc.getId()).setTrashed(true);
+}
+
+function readState_(props, hash) {
+  const raw = props.getProperty("REPORT_" + hash);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+function writeState_(props, hash, state) {
+  props.setProperty("REPORT_" + hash, JSON.stringify(state));
+}
+
+function sha256Hex_(bytes) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)
+    .map(function(b) {
+      const n = (b < 0 ? b + 256 : b);
+      return ("0" + n.toString(16)).slice(-2);
+    }).join("");
+}
+
+function safeTitle_(s) {
+  return String(s || "Informe")
+    .replace(/[\\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "Informe";
+}
+
+function fileExt_(name, fallback) {
+  const m = String(name || "").toLowerCase().match(/\.([a-z0-9]{2,5})$/);
+  return m ? m[1] : fallback;
+}
+
+function isAudio_(name) {
+  return ["m4a","mp4","mp3","mpeg","aac","ogg","oga","opus","wav","caf","amr","3gp"]
+    .indexOf(fileExt_(name, "")) >= 0;
+}
+
+function isImage_(name) {
+  return ["jpg","jpeg","png","webp","heic","heif"]
+    .indexOf(fileExt_(name, "")) >= 0;
+}
+
+function mimeFor_(name, audio) {
+  const e = fileExt_(name, "");
+  const map = {
+    m4a:"audio/mp4", mp4:"audio/mp4", mp3:"audio/mpeg", mpeg:"audio/mpeg",
+    aac:"audio/aac", ogg:"audio/ogg", oga:"audio/ogg", opus:"audio/ogg",
+    wav:"audio/wav", caf:"audio/x-caf", amr:"audio/amr", "3gp":"audio/3gpp",
+    jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", webp:"image/webp",
+    heic:"image/heic", heif:"image/heif"
+  };
+  return map[e] || (audio ? "audio/mp4" : "image/jpeg");
+}
+
+function decodeXml_(s) {
+  return String(s || "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function pad2_(n) {
+  return String(Number(n) || 0).padStart(2, "0");
+}
+
+function json_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
