@@ -366,9 +366,14 @@ function readExistingSummaries_(folder) {
   const file = it.next();
   let entries;
   try {
-    entries = Utilities.unzip(file.getBlob());
-  } catch (_) {
-    throw new Error("No pude leer el Word anterior para actualizarlo sin perder información.");
+    // Un .docx es internamente un ZIP, pero Drive conserva su MIME de Word.
+    // Utilities.unzip puede rechazarlo si no normalizamos el blob como ZIP.
+    const raw = file.getBlob();
+    const zipBlob = Utilities.newBlob(raw.getBytes(), "application/zip", "summary.zip");
+    entries = Utilities.unzip(zipBlob);
+  } catch (err) {
+    throw new Error("No pude leer el Word anterior para actualizarlo sin perder información. " +
+      (err && err.message ? err.message : ""));
   }
 
   const xmlBlob = entries.filter(function(b){ return b.getName() === "word/document.xml"; })[0];
