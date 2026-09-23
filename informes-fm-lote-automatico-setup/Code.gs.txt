@@ -14,7 +14,7 @@ const GEMINI_MODELS = [
 function doGet() {
   return json_({
     ok: true,
-    service: "Carga por lote automática FM ciudad",
+    service: "Carga de informes por lote automática FM ciudad",
     version: "1.0",
     mode: "lotes ordenados audio+foto"
   });
