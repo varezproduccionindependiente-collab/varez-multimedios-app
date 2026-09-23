@@ -15,8 +15,8 @@ function doGet() {
   return json_({
     ok: true,
     service: "Carga de informes por lote automática FM ciudad",
-    version: "1.0",
-    mode: "lotes ordenados audio+foto"
+    version: "2.0",
+    mode: "cola automática en segundo plano"
   });
 }
 
@@ -39,7 +39,7 @@ function doPost(e) {
     const shortHash = batchHash.slice(0, 8);
     const props = PropertiesService.getScriptProperties();
 
-    const zipBlob = Utilities.newBlob(zipBytes, "application/zip", "informes-beta.zip");
+    const zipBlob = Utilities.newBlob(zipBytes, "application/zip", "informes-lote.zip");
     const parts = Utilities.unzip(zipBlob).filter(function(b){
       const n = String(b.getName() || "");
       return b.getBytes().length > 0 &&
@@ -74,18 +74,8 @@ function doPost(e) {
       return json_({ok:false, message:"❌ Esta versión admite hasta 8 informes por envío. Dividí el lote."});
     }
 
-    // WhatsApp/iOS puede reordenar los archivos al compartir o al crear el ZIP.
-    // Por eso NO confiamos en el orden interno del ZIP.
-    // Ordenamos audios y fotos por su nombre original (que incluye fecha/secuencia)
-    // y emparejamos audio 1 con foto 1, audio 2 con foto 2, etc.
-    audios.sort(blobNameCompare_);
-    photos.sort(blobNameCompare_);
-
-    const pairs = audios.map(function(audio, i){
-      return {audio:audio, photo:photos[i]};
-    });
-
     let state = readState_(props, batchHash);
+
     if (state && state.status === "done") {
       return json_({
         ok:true,
@@ -95,128 +85,102 @@ function doPost(e) {
       });
     }
 
-    if (!state || !state.pairs || state.pairs.length !== pairCount) {
-      const lock = LockService.getScriptLock();
-      lock.waitLock(30000);
-      try {
-        state = readState_(props, batchHash);
-        if (!state || !state.pairs || state.pairs.length !== pairCount) {
-          const dailyFolder = getOrCreateDailyFolder_();
-          const startNumber = nextReportNumber_(dailyFolder);
-          const reserved = [];
-
-          for (let i = 0; i < pairCount; i++) {
-            const number = startNumber + i;
-            const n = pad2_(number);
-            const reservation = dailyFolder.createFile(
-              "Informe " + n + " - RESERVADO LOTE " + shortHash + ".txt",
-              "Reserva temporal del lote. No borrar mientras se procesa."
-            );
-            reserved.push({
-              number:number,
-              status:"reserved",
-              reservation_id:reservation.getId()
-            });
-          }
-
-          state = {
-            status:"processing",
-            pair_count:pairCount,
-            folder_id:dailyFolder.getId(),
-            created_at:new Date().toISOString(),
-            pairs:reserved
-          };
-          writeState_(props, batchHash, state);
-        }
-      } finally {
-        lock.releaseLock();
-      }
+    if (state && state.queue_version === 2 &&
+        (state.status === "queued" || state.status === "processing")) {
+      ensureQueueTrigger_();
+      return json_({
+        ok:true,
+        queued:true,
+        count:state.pair_count,
+        message:"⏳ Este lote de " + state.pair_count +
+          " informe(s) ya está en proceso. No hace falta enviarlo de nuevo."
+      });
     }
 
-    for (let i = 0; i < pairCount; i++) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
       state = readState_(props, batchHash);
-      const pstate = state.pairs[i];
 
-      if (pstate.status === "done") continue;
-
-      const folder = DriveApp.getFolderById(state.folder_id);
-
-      if (pstate.status !== "media_uploaded") {
-        const analysis = analyzeAudio_(pairs[i].audio);
-        const title = safeTitle_(analysis.title);
-        const n = pad2_(pstate.number);
-
-        const audioName = "Informe " + n + " - " + title + "." +
-          fileExt_(pairs[i].audio.getName(), "m4a");
-        const photoName = "Informe " + n + " - " + title + "." +
-          fileExt_(pairs[i].photo.getName(), "jpg");
-
-        const created = [];
-        try {
-          const a = pairs[i].audio.copyBlob()
-            .setContentType(mimeFor_(pairs[i].audio.getName(), true))
-            .setName(audioName);
-          const p = pairs[i].photo.copyBlob()
-            .setContentType(mimeFor_(pairs[i].photo.getName(), false))
-            .setName(photoName);
-
-          created.push(folder.createFile(a));
-          created.push(folder.createFile(p));
-        } catch (uploadErr) {
-          created.forEach(function(f){ try { f.setTrashed(true); } catch (_) {} });
-          throw uploadErr;
-        }
-
-        pstate.status = "media_uploaded";
-        pstate.title = title;
-        pstate.short_summary = String(analysis.short_summary || "");
-        pstate.expanded_summary = String(analysis.expanded_summary || "");
-        pstate.transcript_excerpt = String(analysis.transcript_excerpt || "");
-        pstate.audio_file_id = created[0].getId();
-        pstate.photo_file_id = created[1].getId();
-        state.pairs[i] = pstate;
-        writeState_(props, batchHash, state);
+      if (state && state.status === "done") {
+        return json_({
+          ok:true,
+          duplicate:true,
+          count:state.pair_count,
+          message:"✅ Este lote de " + state.pair_count + " informe(s) ya estaba procesado."
+        });
       }
 
-      const existing = readExistingSummaries_(folder);
-      const merged = {};
-      existing.forEach(function(x){ merged[String(x.number)] = x; });
-      merged[String(pstate.number)] = {
-        number:pstate.number,
-        title:pstate.title,
-        expanded_summary:pstate.expanded_summary
+      if (state && state.queue_version === 2 &&
+          (state.status === "queued" || state.status === "processing")) {
+        ensureQueueTrigger_();
+        return json_({
+          ok:true,
+          queued:true,
+          count:state.pair_count,
+          message:"⏳ Este lote de " + state.pair_count +
+            " informe(s) ya está en proceso. No hace falta enviarlo de nuevo."
+        });
+      }
+
+      // Si venimos de una versión anterior que quedó a mitad de camino,
+      // limpiamos únicamente sus reservas/archivos conocidos y rearmamos la cola.
+      if (state && state.queue_version !== 2) {
+        cleanupLegacyBatch_(state, shortHash);
+      }
+
+      const dailyFolder = getOrCreateDailyFolder_();
+      cleanupReservationsForHash_(dailyFolder, shortHash);
+
+      const startNumber = nextReportNumber_(dailyFolder);
+      const queueFolder = getQueueFolder_();
+      const storedZip = queueFolder.createFile(
+        Utilities.newBlob(zipBytes, "application/zip", "LOTE_" + shortHash + ".zip")
+      );
+
+      const reserved = [];
+      for (let i = 0; i < pairCount; i++) {
+        const number = startNumber + i;
+        const n = pad2_(number);
+        const reservation = dailyFolder.createFile(
+          "Informe " + n + " - RESERVADO LOTE " + shortHash + ".txt",
+          "Reserva temporal del lote. El procesamiento continúa automáticamente."
+        );
+        reserved.push({
+          number:number,
+          status:"queued",
+          reservation_id:reservation.getId(),
+          attempts:0
+        });
+      }
+
+      state = {
+        queue_version:2,
+        status:"queued",
+        pair_count:pairCount,
+        folder_id:dailyFolder.getId(),
+        zip_file_id:storedZip.getId(),
+        created_at:new Date().toISOString(),
+        pairs:reserved
       };
-
-      const all = Object.keys(merged)
-        .map(function(k){ return merged[k]; })
-        .sort(function(a,b){ return a.number - b.number; });
-
-      writeSummaryDocx_(folder, all);
-
-      if (pstate.reservation_id) {
-        try { DriveApp.getFileById(pstate.reservation_id).setTrashed(true); } catch (_) {}
-      }
-
-      pstate.status = "done";
-      pstate.finished_at = new Date().toISOString();
-      state.pairs[i] = pstate;
       writeState_(props, batchHash, state);
+    } finally {
+      lock.releaseLock();
     }
 
-    state = readState_(props, batchHash);
-    state.status = "done";
-    state.finished_at = new Date().toISOString();
-    writeState_(props, batchHash, state);
+    ensureQueueTrigger_();
 
     const first = state.pairs[0].number;
     const last = state.pairs[state.pairs.length - 1].number;
     return json_({
       ok:true,
+      queued:true,
       count:pairCount,
       first_report:first,
       last_report:last,
-      message:"✅ " + pairCount + " informe(s) procesados y guardados en Drive: " +
-        "Informe " + pad2_(first) + " al " + pad2_(last) + "."
+      message:"✅ Lote recibido: " + pairCount + " informe(s), del " +
+        pad2_(first) + " al " + pad2_(last) +
+        ". Se procesan automáticamente en segundo plano."
     });
 
   } catch (err) {
@@ -224,6 +188,243 @@ function doPost(e) {
       ok:false,
       message:"❌ LOTE: " + (err && err.message ? err.message : String(err))
     });
+  }
+}
+
+function getQueueFolder_() {
+  const root = DriveApp.getRootFolder();
+  const name = "_FM_CIUDAD_COLA_TEMPORAL_NO_BORRAR";
+  const found = root.getFoldersByName(name);
+  if (found.hasNext()) return found.next();
+  return root.createFolder(name);
+}
+
+function ensureQueueTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const exists = triggers.some(function(t){
+    return t.getHandlerFunction() === "processBatchQueue_";
+  });
+  if (!exists) {
+    ScriptApp.newTrigger("processBatchQueue_")
+      .timeBased()
+      .after(5000)
+      .create();
+  }
+}
+
+function processBatchQueue_() {
+  const started = Date.now();
+  const maxRunMs = 230000;
+  const props = PropertiesService.getScriptProperties();
+  let shouldContinue = false;
+
+  try {
+    while (Date.now() - started < maxRunMs) {
+      const job = findNextQueuedBatch_(props);
+      if (!job) break;
+
+      const hash = job.hash;
+      let state = job.state;
+      const pairIndex = state.pairs.findIndex(function(p){ return p.status !== "done"; });
+
+      if (pairIndex < 0) {
+        finishQueuedBatch_(props, hash, state);
+        continue;
+      }
+
+      state.status = "processing";
+      state.started_at = state.started_at || new Date().toISOString();
+      writeState_(props, hash, state);
+
+      try {
+        processQueuedPair_(props, hash, state, pairIndex);
+      } catch (err) {
+        state = readState_(props, hash) || state;
+        const p = state.pairs[pairIndex];
+        p.attempts = Number(p.attempts || 0) + 1;
+        p.last_error = err && err.message ? err.message : String(err);
+        p.last_error_at = new Date().toISOString();
+        state.pairs[pairIndex] = p;
+
+        if (p.attempts >= 5) {
+          state.status = "error";
+          state.last_error = p.last_error;
+          state.failed_pair = pairIndex + 1;
+          writeState_(props, hash, state);
+        } else {
+          state.status = "queued";
+          writeState_(props, hash, state);
+          shouldContinue = true;
+        }
+        break;
+      }
+
+      state = readState_(props, hash);
+      if (state && state.status !== "done") shouldContinue = true;
+    }
+  } finally {
+    if (findNextQueuedBatch_(props)) shouldContinue = true;
+    if (shouldContinue) {
+      ScriptApp.newTrigger("processBatchQueue_")
+        .timeBased()
+        .after(10000)
+        .create();
+    }
+  }
+}
+
+function findNextQueuedBatch_(props) {
+  const jobs = [];
+  props.getKeys().forEach(function(key){
+    if (key.indexOf("REPORT_") !== 0) return;
+    const raw = props.getProperty(key);
+    if (!raw) return;
+    try {
+      const state = JSON.parse(raw);
+      if (state.queue_version === 2 &&
+          (state.status === "queued" || state.status === "processing")) {
+        jobs.push({
+          hash:key.slice("REPORT_".length),
+          state:state
+        });
+      }
+    } catch (_) {}
+  });
+
+  jobs.sort(function(a,b){
+    return String(a.state.created_at || "").localeCompare(String(b.state.created_at || ""));
+  });
+  return jobs.length ? jobs[0] : null;
+}
+
+function processQueuedPair_(props, hash, state, pairIndex) {
+  const pstate = state.pairs[pairIndex];
+  const zipFile = DriveApp.getFileById(state.zip_file_id);
+  const zipBlob = Utilities.newBlob(
+    zipFile.getBlob().getBytes(),
+    "application/zip",
+    "lote.zip"
+  );
+
+  const parts = Utilities.unzip(zipBlob).filter(function(b){
+    const n = String(b.getName() || "");
+    return b.getBytes().length > 0 &&
+      !/\/$/.test(n) &&
+      !/^__MACOSX\//.test(n) &&
+      !/(^|\/)\.DS_Store$/.test(n);
+  });
+
+  const audios = parts.filter(function(b){ return isAudio_(b.getName()); }).sort(blobNameCompare_);
+  const photos = parts.filter(function(b){ return isImage_(b.getName()); }).sort(blobNameCompare_);
+
+  if (audios.length !== state.pair_count || photos.length !== state.pair_count) {
+    throw new Error("El ZIP temporal ya no coincide con el lote original.");
+  }
+
+  const audioBlob = audios[pairIndex];
+  const photoBlob = photos[pairIndex];
+  const analysis = analyzeAudio_(audioBlob);
+  const title = safeTitle_(analysis.title);
+  const n = pad2_(pstate.number);
+  const folder = DriveApp.getFolderById(state.folder_id);
+
+  const audioName = "Informe " + n + " - " + title + "." +
+    fileExt_(audioBlob.getName(), "m4a");
+  const photoName = "Informe " + n + " - " + title + "." +
+    fileExt_(photoBlob.getName(), "jpg");
+
+  const created = [];
+  try {
+    const a = audioBlob.copyBlob()
+      .setContentType(mimeFor_(audioBlob.getName(), true))
+      .setName(audioName);
+    const p = photoBlob.copyBlob()
+      .setContentType(mimeFor_(photoBlob.getName(), false))
+      .setName(photoName);
+
+    created.push(folder.createFile(a));
+    created.push(folder.createFile(p));
+  } catch (uploadErr) {
+    created.forEach(function(f){ try { f.setTrashed(true); } catch (_) {} });
+    throw uploadErr;
+  }
+
+  pstate.status = "media_uploaded";
+  pstate.title = title;
+  pstate.expanded_summary = String(analysis.expanded_summary || "");
+  pstate.audio_file_id = created[0].getId();
+  pstate.photo_file_id = created[1].getId();
+  pstate.last_error = "";
+  state.pairs[pairIndex] = pstate;
+  writeState_(props, hash, state);
+
+  const existing = readExistingSummaries_(folder);
+  const merged = {};
+  existing.forEach(function(x){ merged[String(x.number)] = x; });
+  merged[String(pstate.number)] = {
+    number:pstate.number,
+    title:pstate.title,
+    expanded_summary:pstate.expanded_summary
+  };
+
+  const all = Object.keys(merged)
+    .map(function(k){ return merged[k]; })
+    .sort(function(a,b){ return a.number - b.number; });
+
+  writeSummaryDocx_(folder, all);
+
+  if (pstate.reservation_id) {
+    try { DriveApp.getFileById(pstate.reservation_id).setTrashed(true); } catch (_) {}
+  }
+
+  pstate.status = "done";
+  pstate.finished_at = new Date().toISOString();
+  state.pairs[pairIndex] = pstate;
+
+  const allDone = state.pairs.every(function(p){ return p.status === "done"; });
+  state.status = allDone ? "done" : "queued";
+  if (allDone) state.finished_at = new Date().toISOString();
+  writeState_(props, hash, state);
+
+  if (allDone) {
+    try { DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+  }
+}
+
+function finishQueuedBatch_(props, hash, state) {
+  state.status = "done";
+  state.finished_at = state.finished_at || new Date().toISOString();
+  writeState_(props, hash, state);
+  if (state.zip_file_id) {
+    try { DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+  }
+}
+
+function cleanupLegacyBatch_(state, shortHash) {
+  if (!state) return;
+  (state.pairs || []).forEach(function(p){
+    ["reservation_id","audio_file_id","photo_file_id"].forEach(function(k){
+      if (p && p[k]) {
+        try { DriveApp.getFileById(p[k]).setTrashed(true); } catch (_) {}
+      }
+    });
+  });
+
+  if (state.folder_id) {
+    try {
+      cleanupReservationsForHash_(DriveApp.getFolderById(state.folder_id), shortHash);
+    } catch (_) {}
+  }
+}
+
+function cleanupReservationsForHash_(folder, shortHash) {
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    if (name.indexOf("RESERVADO LOTE " + shortHash) >= 0) {
+      try { f.setTrashed(true); } catch (_) {}
+    }
   }
 }
 
