@@ -63,7 +63,7 @@ h1{font-size:32px;margin:6px 0}.muted{color:#9cabc0;line-height:1.5}.btn{width:1
 let code="",manifest="";
 async function copy(v,b){await navigator.clipboard.writeText(v);const x=b.textContent;b.textContent="✓ Copiado";setTimeout(()=>b.textContent=x,1100)}
 async function init(){
- code=await fetch("./Code.gs.txt?v=2").then(r=>r.text());
+ code=await fetch("./Code.gs.txt?v=3").then(r=>r.text());
  manifest=await fetch("./appsscript.json.txt?v=2").then(r=>r.text());
  document.getElementById("code").textContent=code.slice(0,1600)+"\n\n[… listo para copiar completo …]";
  document.getElementById("manifest").textContent=manifest;
