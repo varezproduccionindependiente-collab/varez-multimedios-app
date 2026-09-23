@@ -56,15 +56,15 @@ h1{font-size:32px;margin:6px 0}.muted{color:#9cabc0;line-height:1.5}.btn{width:1
 </div>
 
 <div class="card">
-<div class="ok"><b>Seguridad:</b> esta versión reserva todos los números primero. Si falla a mitad de camino, al repetir exactamente el mismo lote continúa desde donde quedó y no vuelve a procesar los ya terminados.</div>
+<div class="ok"><b>Modo automático:</b> el Atajo entrega el lote y recibe confirmación enseguida. Después Apps Script procesa los informes en segundo plano, uno por uno, para evitar que iPhone agote el tiempo de espera.</div>
 </div>
 </main>
 <script>
 let code="",manifest="";
 async function copy(v,b){await navigator.clipboard.writeText(v);const x=b.textContent;b.textContent="✓ Copiado";setTimeout(()=>b.textContent=x,1100)}
 async function init(){
- code=await fetch("./Code.gs.txt?v=3").then(r=>r.text());
- manifest=await fetch("./appsscript.json.txt?v=2").then(r=>r.text());
+ code=await fetch("./Code.gs.txt?v=4").then(r=>r.text());
+ manifest=await fetch("./appsscript.json.txt?v=4").then(r=>r.text());
  document.getElementById("code").textContent=code.slice(0,1600)+"\n\n[… listo para copiar completo …]";
  document.getElementById("manifest").textContent=manifest;
 }
