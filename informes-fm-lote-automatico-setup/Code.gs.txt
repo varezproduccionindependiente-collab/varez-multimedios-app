@@ -15,8 +15,8 @@ function doGet() {
   return json_({
     ok: true,
     service: "Carga de informes por lote automática FM ciudad",
-    version: "2.0",
-    mode: "cola automática en segundo plano"
+    version: "3.0",
+    mode: "recepción rápida + cola automática"
   });
 }
 
@@ -36,151 +36,42 @@ function doPost(e) {
     }
 
     const batchHash = sha256Hex_(zipBytes);
-    const shortHash = batchHash.slice(0, 8);
     const props = PropertiesService.getScriptProperties();
-
-    const zipBlob = Utilities.newBlob(zipBytes, "application/zip", "informes-lote.zip");
-    const parts = Utilities.unzip(zipBlob).filter(function(b){
-      const n = String(b.getName() || "");
-      return b.getBytes().length > 0 &&
-        !/\/$/.test(n) &&
-        !/^__MACOSX\//.test(n) &&
-        !/(^|\/)\.DS_Store$/.test(n);
-    });
-
-    const audios = parts.filter(function(b){ return isAudio_(b.getName()); });
-    const photos = parts.filter(function(b){ return isImage_(b.getName()); });
-    const unsupported = parts.filter(function(b){
-      return !isAudio_(b.getName()) && !isImage_(b.getName());
-    });
-
-    if (unsupported.length) {
-      return json_({
-        ok:false,
-        message:"❌ Hay " + unsupported.length + " archivo(s) que no son audio ni foto. No se subió nada."
-      });
-    }
-
-    if (!audios.length || audios.length !== photos.length) {
-      return json_({
-        ok:false,
-        message:"❌ El lote debe tener la misma cantidad de audios y fotos. Recibí " +
-          audios.length + " audio(s) y " + photos.length + " foto(s). No se subió nada."
-      });
-    }
-
-    const pairCount = audios.length;
-    if (pairCount > 8) {
-      return json_({ok:false, message:"❌ Esta versión admite hasta 8 informes por envío. Dividí el lote."});
-    }
-
     let state = readState_(props, batchHash);
 
-    if (state && state.status === "done") {
-      return json_({
-        ok:true,
-        duplicate:true,
-        count:state.pair_count,
-        message:"✅ Este lote de " + state.pair_count + " informe(s) ya estaba procesado."
-      });
-    }
-
-    if (state && state.queue_version === 2 &&
-        (state.status === "queued" || state.status === "processing")) {
+    if (state && state.queue_version === 3 &&
+        ["received","queued","processing","done"].indexOf(state.status) >= 0) {
       ensureQueueTrigger_();
       return json_({
         ok:true,
-        queued:true,
-        count:state.pair_count,
-        message:"⏳ Este lote de " + state.pair_count +
-          " informe(s) ya está en proceso. No hace falta enviarlo de nuevo."
+        duplicate:true,
+        message: state.status === "done"
+          ? "✅ Este lote ya fue procesado."
+          : "✅ El lote ya fue recibido y sigue procesándose automáticamente."
       });
     }
 
-    const lock = LockService.getScriptLock();
-    lock.waitLock(30000);
-    try {
-      state = readState_(props, batchHash);
+    // Recepción rápida: guardamos un único ZIP y respondemos al iPhone.
+    // Toda la validación, numeración, análisis y creación de archivos ocurre después.
+    const queueFolder = getQueueFolder_();
+    const storedZip = queueFolder.createFile(
+      Utilities.newBlob(zipBytes, "application/zip", "LOTE_" + batchHash.slice(0,8) + ".zip")
+    );
 
-      if (state && state.status === "done") {
-        return json_({
-          ok:true,
-          duplicate:true,
-          count:state.pair_count,
-          message:"✅ Este lote de " + state.pair_count + " informe(s) ya estaba procesado."
-        });
-      }
-
-      if (state && state.queue_version === 2 &&
-          (state.status === "queued" || state.status === "processing")) {
-        ensureQueueTrigger_();
-        return json_({
-          ok:true,
-          queued:true,
-          count:state.pair_count,
-          message:"⏳ Este lote de " + state.pair_count +
-            " informe(s) ya está en proceso. No hace falta enviarlo de nuevo."
-        });
-      }
-
-      // Si venimos de una versión anterior que quedó a mitad de camino,
-      // limpiamos únicamente sus reservas/archivos conocidos y rearmamos la cola.
-      if (state && state.queue_version !== 2) {
-        cleanupLegacyBatch_(state, shortHash);
-      }
-
-      const dailyFolder = getOrCreateDailyFolder_();
-      cleanupReservationsForHash_(dailyFolder, shortHash);
-
-      const startNumber = nextReportNumber_(dailyFolder);
-      const queueFolder = getQueueFolder_();
-      const storedZip = queueFolder.createFile(
-        Utilities.newBlob(zipBytes, "application/zip", "LOTE_" + shortHash + ".zip")
-      );
-
-      const reserved = [];
-      for (let i = 0; i < pairCount; i++) {
-        const number = startNumber + i;
-        const n = pad2_(number);
-        const reservation = dailyFolder.createFile(
-          "Informe " + n + " - RESERVADO LOTE " + shortHash + ".txt",
-          "Reserva temporal del lote. El procesamiento continúa automáticamente."
-        );
-        reserved.push({
-          number:number,
-          status:"queued",
-          reservation_id:reservation.getId(),
-          attempts:0
-        });
-      }
-
-      state = {
-        queue_version:2,
-        status:"queued",
-        pair_count:pairCount,
-        folder_id:dailyFolder.getId(),
-        zip_file_id:storedZip.getId(),
-        created_at:new Date().toISOString(),
-        pairs:reserved
-      };
-      writeState_(props, batchHash, state);
-    } finally {
-      lock.releaseLock();
-    }
+    state = {
+      queue_version:3,
+      status:"received",
+      zip_file_id:storedZip.getId(),
+      created_at:new Date().toISOString()
+    };
+    writeState_(props, batchHash, state);
 
     ensureQueueTrigger_();
 
-    const first = state.pairs[0].number;
-    const last = state.pairs[state.pairs.length - 1].number;
     return json_({
       ok:true,
       queued:true,
-      count:pairCount,
-      first_report:first,
-      last_report:last,
-      message:"✅ Lote recibido: " + pairCount + " informe(s), del " +
-        pad2_(first) + " al " + pad2_(last) +
-        ". Se procesan automáticamente en segundo plano."
+      message:"✅ Lote recibido correctamente. Los informes se procesan automáticamente en segundo plano."
     });
 
   } catch (err) {
@@ -192,11 +83,17 @@ function doPost(e) {
 }
 
 function getQueueFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty("QUEUE_FOLDER_ID");
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (_) {}
+  }
   const root = DriveApp.getRootFolder();
   const name = "_FM_CIUDAD_COLA_TEMPORAL_NO_BORRAR";
   const found = root.getFoldersByName(name);
-  if (found.hasNext()) return found.next();
-  return root.createFolder(name);
+  const folder = found.hasNext() ? found.next() : root.createFolder(name);
+  props.setProperty("QUEUE_FOLDER_ID", folder.getId());
+  return folder;
 }
 
 function ensureQueueTrigger_() {
@@ -225,7 +122,21 @@ function processBatchQueue_() {
 
       const hash = job.hash;
       let state = job.state;
-      const pairIndex = state.pairs.findIndex(function(p){ return p.status !== "done"; });
+
+      if (state.queue_version === 3 && !state.initialized) {
+        try {
+          state = initializeQueuedBatch_(props, hash, state);
+        } catch (initErr) {
+          state.status = "error";
+          state.last_error = initErr && initErr.message ? initErr.message : String(initErr);
+          state.failed_at = new Date().toISOString();
+          writeState_(props, hash, state);
+          try { if (state.zip_file_id) DriveApp.getFileById(state.zip_file_id).setTrashed(true); } catch (_) {}
+          continue;
+        }
+      }
+
+      const pairIndex = (state.pairs || []).findIndex(function(p){ return p.status !== "done"; });
 
       if (pairIndex < 0) {
         finishQueuedBatch_(props, hash, state);
@@ -281,8 +192,8 @@ function findNextQueuedBatch_(props) {
     if (!raw) return;
     try {
       const state = JSON.parse(raw);
-      if (state.queue_version === 2 &&
-          (state.status === "queued" || state.status === "processing")) {
+      if ((state.queue_version === 2 || state.queue_version === 3) &&
+          (state.status === "received" || state.status === "queued" || state.status === "processing")) {
         jobs.push({
           hash:key.slice("REPORT_".length),
           state:state
@@ -295,6 +206,74 @@ function findNextQueuedBatch_(props) {
     return String(a.state.created_at || "").localeCompare(String(b.state.created_at || ""));
   });
   return jobs.length ? jobs[0] : null;
+}
+
+function initializeQueuedBatch_(props, hash, state) {
+  const shortHash = hash.slice(0, 8);
+  const zipFile = DriveApp.getFileById(state.zip_file_id);
+  const zipBlob = Utilities.newBlob(
+    zipFile.getBlob().getBytes(),
+    "application/zip",
+    "lote.zip"
+  );
+
+  const parts = Utilities.unzip(zipBlob).filter(function(b){
+    const n = String(b.getName() || "");
+    return b.getBytes().length > 0 &&
+      !/\/$/.test(n) &&
+      !/^__MACOSX\//.test(n) &&
+      !/(^|\/)\.DS_Store$/.test(n);
+  });
+
+  const audios = parts.filter(function(b){ return isAudio_(b.getName()); });
+  const photos = parts.filter(function(b){ return isImage_(b.getName()); });
+  const unsupported = parts.filter(function(b){
+    return !isAudio_(b.getName()) && !isImage_(b.getName());
+  });
+
+  if (unsupported.length) {
+    throw new Error("El lote contiene " + unsupported.length + " archivo(s) que no son audio ni foto.");
+  }
+  if (!audios.length || audios.length !== photos.length) {
+    throw new Error("El lote debe tener la misma cantidad de audios y fotos. Recibí " +
+      audios.length + " audio(s) y " + photos.length + " foto(s).");
+  }
+  if (audios.length > 8) {
+    throw new Error("Esta versión admite hasta 8 informes por envío.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const dailyFolder = getOrCreateDailyFolder_();
+    const startNumber = nextReportNumber_(dailyFolder);
+    const reserved = [];
+
+    for (let i = 0; i < audios.length; i++) {
+      const number = startNumber + i;
+      const reservation = dailyFolder.createFile(
+        "Informe " + pad2_(number) + " - RESERVADO LOTE " + shortHash + ".txt",
+        "Reserva temporal del lote. El procesamiento continúa automáticamente."
+      );
+      reserved.push({
+        number:number,
+        status:"queued",
+        reservation_id:reservation.getId(),
+        attempts:0
+      });
+    }
+
+    state.initialized = true;
+    state.status = "queued";
+    state.pair_count = audios.length;
+    state.folder_id = dailyFolder.getId();
+    state.pairs = reserved;
+    state.initialized_at = new Date().toISOString();
+    writeState_(props, hash, state);
+    return state;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function processQueuedPair_(props, hash, state, pairIndex) {
