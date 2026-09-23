@@ -48,32 +48,42 @@ function doPost(e) {
         !/(^|\/)\.DS_Store$/.test(n);
     });
 
-    if (parts.length < 2 || parts.length % 2 !== 0) {
+    const audios = parts.filter(function(b){ return isAudio_(b.getName()); });
+    const photos = parts.filter(function(b){ return isImage_(b.getName()); });
+    const unsupported = parts.filter(function(b){
+      return !isAudio_(b.getName()) && !isImage_(b.getName());
+    });
+
+    if (unsupported.length) {
       return json_({
         ok:false,
-        message:"❌ El lote debe venir en pares: audio + foto, audio + foto. Recibí " + parts.length + " archivo(s)."
+        message:"❌ Hay " + unsupported.length + " archivo(s) que no son audio ni foto. No se subió nada."
       });
     }
 
-    const pairCount = parts.length / 2;
+    if (!audios.length || audios.length !== photos.length) {
+      return json_({
+        ok:false,
+        message:"❌ El lote debe tener la misma cantidad de audios y fotos. Recibí " +
+          audios.length + " audio(s) y " + photos.length + " foto(s). No se subió nada."
+      });
+    }
+
+    const pairCount = audios.length;
     if (pairCount > 8) {
       return json_({ok:false, message:"❌ Esta versión admite hasta 8 informes por envío. Dividí el lote."});
     }
 
-    const pairs = [];
-    for (let i = 0; i < pairCount; i++) {
-      const audio = parts[i * 2];
-      const photo = parts[i * 2 + 1];
-      if (!isAudio_(audio.getName()) || !isImage_(photo.getName())) {
-        return json_({
-          ok:false,
-          message:"❌ Orden incorrecto en el par " + (i + 1) +
-            ". Debe ser AUDIO y después FOTO. Recibí: " +
-            audio.getName() + " → " + photo.getName() + ". No se subió nada."
-        });
-      }
-      pairs.push({audio:audio, photo:photo});
-    }
+    // WhatsApp/iOS puede reordenar los archivos al compartir o al crear el ZIP.
+    // Por eso NO confiamos en el orden interno del ZIP.
+    // Ordenamos audios y fotos por su nombre original (que incluye fecha/secuencia)
+    // y emparejamos audio 1 con foto 1, audio 2 con foto 2, etc.
+    audios.sort(blobNameCompare_);
+    photos.sort(blobNameCompare_);
+
+    const pairs = audios.map(function(audio, i){
+      return {audio:audio, photo:photos[i]};
+    });
 
     let state = readState_(props, batchHash);
     if (state && state.status === "done") {
@@ -215,6 +225,16 @@ function doPost(e) {
       message:"❌ LOTE: " + (err && err.message ? err.message : String(err))
     });
   }
+}
+
+function blobNameCompare_(a, b) {
+  return naturalNameKey_(a.getName()).localeCompare(naturalNameKey_(b.getName()));
+}
+
+function naturalNameKey_(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/(\d+)/g, function(m){ return ("000000000000" + m).slice(-12); });
 }
 
 function autorizar() {
